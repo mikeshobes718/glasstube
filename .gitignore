@@ -1,0 +1,10 @@
+.vercel
+.env
+.env.*
+node_modules
+.DS_Store
+*.log
+ios/GlassTube.xcodeproj/xcuserdata/
+ios/GlassTube.xcodeproj/project.xcworkspace/xcuserdata/
+ios/DerivedData/
+ios/build/

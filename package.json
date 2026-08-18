@@ -1,0 +1,7 @@
+{
+  "name": "glasstube",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "YouTube HUD for Meta Ray-Ban Display glasses"
+}

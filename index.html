@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="description" content="Watch YouTube on Meta Ray-Ban Display glasses">
+<meta name="mrbd-web-app-capable" content="yes">
+<meta name="viewport" content="width=600, height=600, initial-scale=1.0, user-scalable=no">
+<title>GlassTube</title>
+<link rel="icon" type="image/png" href="/icon-192.png?v=2">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" type="image/png" href="/apple-touch-icon.png?v=2" sizes="180x180">
+<link rel="preload" href="/icon-192.png?v=2" as="image">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="/styles.css?v=6">
+<script>
+(function () {
+  function onPhone() {
+    return /iPhone|iPod|iPad|Android/i.test(navigator.userAgent);
+  }
+  function usePhoneViewport() {
+    if (!onPhone()) return;
+    var meta = document.querySelector('meta[name="viewport"]');
+    if (meta) {
+      meta.setAttribute(
+        'content',
+        'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'
+      );
+    }
+  }
+  function fitStage() {
+    var stage = document.getElementById('stage');
+    if (!stage) return;
+    var w = document.documentElement.clientWidth || window.innerWidth || 600;
+    var h = document.documentElement.clientHeight || window.innerHeight || 600;
+    if (w === 600 && h === 600 && !onPhone()) {
+      stage.style.left = '0px';
+      stage.style.top = '0px';
+      stage.style.transform = 'none';
+      return;
+    }
+    var s = Math.min(w / 600, h / 600);
+    stage.style.left = ((w - 600 * s) / 2) + 'px';
+    stage.style.top = ((h - 600 * s) / 2) + 'px';
+    stage.style.transform = 'scale(' + s + ')';
+    stage.style.transformOrigin = '0 0';
+  }
+  window.glasstubeFitStage = fitStage;
+  usePhoneViewport();
+  window.addEventListener('resize', fitStage);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', fitStage);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fitStage);
+  } else {
+    fitStage();
+  }
+})();
+</script>
+<script>
+window.glasstubeErrors = [];
+window.glasstubeReport = function (text) {
+  window.glasstubeErrors.push(text);
+  var bar = document.getElementById('errbar');
+  if (bar) {
+    bar.textContent = text;
+    bar.className = 'errbar';
+  }
+};
+window.onerror = function (msg, src, line, col) {
+  var file = src ? String(src).split('/').pop() : '?';
+  window.glasstubeReport('JS error: ' + msg + ' (' + file + ':' + line + ':' + col + ')');
+  return false;
+};
+window.addEventListener('unhandledrejection', function (e) {
+  var r = e && e.reason;
+  window.glasstubeReport('Async error: ' + ((r && r.message) || r || 'unknown'));
+});
+</script>
+</head>
+<body>
+<div id="stage">
+
+<div id="splash" class="splash">
+  <img class="splash-icon" src="/icon-192.png?v=2" alt="GlassTube">
+  <div class="splash-name">GlassTube</div>
+  <div class="splash-tag">YouTube on glass</div>
+  <div class="splash-credit">Sit still. Video overlays the real world.</div>
+</div>
+
+<div id="errbar" class="errbar hidden"></div>
+
+<section id="screen-home" class="screen">
+  <h1 class="title title-home"><img class="title-icon" src="/icon-192.png?v=2" alt="">GlassTube</h1>
+  <div class="list list-home screen-body">
+    <button class="focusable menu-btn hidden" id="btn-continue" data-menu="continue">Continue<small id="continue-sub"></small></button>
+    <button class="focusable menu-btn" data-menu="recents">Recents</button>
+    <button class="focusable menu-btn" data-menu="channels">Channels</button>
+    <button class="focusable menu-btn" data-menu="playlists">Playlists<small>Lists you sent from the phone</small></button>
+    <button class="focusable menu-btn" data-menu="phone">From phone<small>Paste a YouTube link on your iPhone</small></button>
+    <button class="focusable menu-btn" data-menu="settings">Settings</button>
+    <button class="focusable menu-btn" data-menu="debug">Diagnostics</button>
+  </div>
+</section>
+
+<section id="screen-list" class="screen hidden">
+  <h2 id="list-title" class="title"></h2>
+  <div id="list-items" class="list screen-body"></div>
+  <div id="list-back" class="list back-row"></div>
+</section>
+
+<section id="screen-player" class="screen screen-flush hidden">
+  <div id="player-title">Loading...</div>
+  <div id="player-channel"></div>
+  <div id="yt-wrap">
+    <div id="yt-slot"><div id="yt-host"></div></div>
+    <img id="yt-poster" alt="">
+  </div>
+  <div id="player-time">0:00 / 0:00</div>
+  <div id="player-bar"><div id="player-fill"></div></div>
+  <div id="player-next"></div>
+  <div id="player-hint">Enter play · Left back · Right +10s · Up -10s · Down next</div>
+  <div id="play-gate" class="play-gate hidden">
+    <div id="play-gate-title" class="play-gate-title"></div>
+    <div id="play-gate-msg" class="play-gate-msg">Enter to play</div>
+  </div>
+  <div id="player-error" class="hidden"></div>
+</section>
+
+<section id="screen-phone" class="screen hidden">
+  <h2 class="title">From phone</h2>
+  <div class="screen-body">
+    <div id="pair-code" class="pair-code">------</div>
+    <div id="pair-help" class="pair-help">Getting a code...</div>
+    <ol id="pair-steps" class="pair-steps">
+      <li>Open GlassTube on your iPhone</li>
+      <li>Type this code</li>
+      <li>Paste a YouTube link and send</li>
+    </ol>
+  </div>
+  <div class="list back-row">
+    <button class="focusable menu-btn" id="btn-pair-new">New code</button>
+    <button class="focusable back-btn" id="btn-phone-back">Back <span class="back-hint">swipe left</span></button>
+  </div>
+</section>
+
+<section id="screen-settings" class="screen hidden">
+  <h2 class="title">Settings</h2>
+  <div class="list list-settings screen-body">
+    <button class="focusable menu-btn" id="btn-sound">Sound<small id="sound-state">On</small></button>
+    <button class="focusable menu-btn" id="btn-captions">Captions<small id="captions-state">Off</small></button>
+    <button class="focusable menu-btn" id="btn-speed">Speed<small id="speed-state">1x</small></button>
+    <button class="focusable menu-btn" id="btn-repeat">Repeat<small id="repeat-state">All</small></button>
+    <button class="focusable menu-btn" id="btn-shuffle">Shuffle<small id="shuffle-state">Off</small></button>
+    <button class="focusable menu-btn" id="btn-picture">Picture<small id="picture-state">Video</small></button>
+    <button class="focusable menu-btn" id="btn-sleep">Sleep timer<small id="sleep-state">Off</small></button>
+  </div>
+  <div class="list back-row">
+    <button class="focusable back-btn" id="btn-settings-back">Back <span class="back-hint">swipe left</span></button>
+  </div>
+</section>
+
+<section id="screen-debug" class="screen hidden">
+  <h2 class="title">Diagnostics</h2>
+  <div id="debug-rows" class="debug-rows screen-body"></div>
+  <div class="list back-row">
+    <button class="focusable back-btn" id="btn-retest">Run self-test</button>
+    <button class="focusable back-btn" id="btn-debug-back">Back <span class="back-hint">swipe left</span></button>
+  </div>
+</section>
+
+<div id="status" class="status hidden"></div>
+
+<script src="/sound.js?v=6"></script>
+<script src="/prefs.js?v=6"></script>
+<script src="/player.js?v=6"></script>
+<script src="/app.js?v=6"></script>
+</div>
+</body>
+</html>

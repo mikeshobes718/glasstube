@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Send a YouTube link to GlassTube on Meta Ray-Ban Display glasses">
+<meta name="theme-color" content="#0b1116">
+<title>GlassTube phone</title>
+<link rel="icon" type="image/png" href="/icon-192.png?v=2">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" sizes="180x180">
+<style>
+:root {
+  --bg: #f4f7f9;
+  --card: #fff;
+  --ink: #10242e;
+  --muted: #5d7784;
+  --line: #dde6ea;
+  --accent: #007a99;
+  --accent-ink: #fff;
+  --good: #0b7a4b;
+  --bad: #b3261e;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 17px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  padding: 0 0 48px;
+}
+header {
+  padding: 22px 20px 16px;
+  background: #0b1116;
+  color: #fff;
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand img {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: #0a1016;
+  flex: 0 0 auto;
+}
+header h1 { margin: 0; font-size: 22px; letter-spacing: 0.2px; }
+header p { margin: 4px 0 0; font-size: 14px; color: #8fd8ff; }
+main { padding: 16px; max-width: 620px; margin: 0 auto; }
+section {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+h2 { margin: 0 0 4px; font-size: 17px; }
+.hint { margin: 0 0 12px; font-size: 14px; color: var(--muted); }
+.steps { margin: 0 0 14px; padding-left: 22px; color: var(--ink); font-size: 15px; }
+.steps li { margin: 6px 0; }
+label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin: 12px 0 6px; }
+input {
+  width: 100%;
+  padding: 13px 14px;
+  font-size: 17px;
+  font-family: inherit;
+  color: var(--ink);
+  background: #fbfdfe;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+input:focus { outline: none; border-color: var(--accent); background: #fff; }
+#code { text-transform: uppercase; letter-spacing: 5px; font-size: 24px; font-weight: 700; text-align: center; }
+button {
+  width: 100%;
+  min-height: 50px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  font: 600 17px/1.2 inherit;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+button.ghost { color: var(--accent); background: #eaf4f7; }
+button.slim { min-height: 40px; width: auto; padding: 8px 14px; margin: 0; font-size: 15px; }
+button.tiny { min-height: 34px; width: auto; padding: 6px 10px; margin: 0; font-size: 14px; }
+.row { display: flex; gap: 10px; }
+.row input { flex: 1; }
+.paired {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px 14px; border-radius: 10px;
+  background: #eef8f3; border: 1px solid #c9e7d8;
+}
+.paired b { font-size: 22px; letter-spacing: 4px; }
+.preview {
+  display: flex; gap: 12px; align-items: center;
+  margin-top: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 10px;
+}
+.preview img { width: 120px; height: 68px; object-fit: cover; border-radius: 8px; background: #111; }
+.preview .t { font-weight: 600; }
+.preview .c { font-size: 14px; color: var(--muted); }
+.msg { margin-top: 12px; font-size: 15px; min-height: 22px; }
+.msg.ok { color: var(--good); }
+.msg.err { color: var(--bad); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.chips button {
+  width: auto;
+  min-height: 40px;
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 15px;
+}
+.vid { list-style: none; margin: 0; padding: 0; }
+.vid li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 0; border-bottom: 1px solid var(--line);
+}
+.vid img { width: 96px; height: 54px; object-fit: cover; border-radius: 8px; background: #111; flex: 0 0 auto; }
+.vid .txt { flex: 1; min-width: 0; }
+.vid .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vid .a { font-size: 14px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty { color: var(--muted); font-size: 15px; padding: 10px 0; }
+.pl { list-style: none; margin: 0; padding: 0; }
+.pl > li { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.pl .top { display: flex; align-items: center; gap: 10px; }
+.pl .n { font-weight: 600; flex: 1; }
+#pl-editor { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+#pl-editor h3 { margin: 0 0 8px; font-size: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <img src="/icon-192.png?v=2" alt="GlassTube">
+    <div>
+      <h1>GlassTube phone</h1>
+      <p>Paste here, watch there.</p>
+    </div>
+  </div>
+</header>
+<main>
+
+<section id="pair-card">
+  <h2>Pair with your glasses</h2>
+  <ol class="steps" id="pair-steps">
+    <li>On the glasses, GlassTube shows a six character code under <b>From phone</b>.</li>
+    <li>Type that code here once.</li>
+    <li>Paste a YouTube link and send. It starts on the glasses by itself.</li>
+  </ol>
+  <div id="pair-form">
+    <input id="code" inputmode="text" autocapitalize="characters" autocomplete="off"
+           spellcheck="false" maxlength="7" placeholder="ABC123">
+    <button id="btn-connect">Connect</button>
+  </div>
+  <div id="pair-ok" class="paired" hidden>
+    <span>Paired to <b id="code-shown"></b></span>
+    <button class="slim ghost" id="btn-unpair">Change</button>
+  </div>
+  <div id="pair-msg" class="msg"></div>
+</section>
+
+<section id="send-card" hidden>
+  <h2>Send a video</h2>
+  <p class="hint">Paste a youtube.com, youtu.be, or playlist link. A playlist plays through on the glasses by itself.</p>
+  <div class="row">
+    <input id="url" type="url" autocomplete="off" placeholder="https://youtu.be/...">
+    <button class="slim ghost" id="btn-paste">Paste</button>
+  </div>
+  <button id="btn-send">Send to the glasses</button>
+  <div id="preview" hidden class="preview">
+    <img id="prev-img" alt="">
+    <div>
+      <div class="t" id="prev-title"></div>
+      <div class="c" id="prev-ch"></div>
+    </div>
+  </div>
+  <div id="send-msg" class="msg"></div>
+</section>
+
+<section id="quick-card" hidden>
+  <h2>Quick channels</h2>
+  <p class="hint">Sends the latest video from that channel.</p>
+  <div class="chips" id="chips"></div>
+</section>
+
+<section id="recent-card" hidden>
+  <h2>Recently sent</h2>
+  <p class="hint">Tap one to send it again, or play the whole list.</p>
+  <button class="ghost" id="btn-play-recents">Play recents on the glasses</button>
+  <ul id="recents" class="vid"></ul>
+</section>
+
+<section id="playlist-card" hidden>
+  <h2>Playlists</h2>
+  <p class="hint">Make a list, send it once, and the glasses play one video after the next.</p>
+  <label for="pl-name">New playlist name</label>
+  <div class="row">
+    <input id="pl-name" autocomplete="off" placeholder="Gym, commute, sleep...">
+    <button class="slim" id="btn-pl-new">Create</button>
+  </div>
+  <ul id="pl-list" class="pl"></ul>
+  <div id="pl-editor" hidden>
+    <h3 id="pl-edit-name"></h3>
+    <div class="row">
+      <input id="pl-url" type="url" autocomplete="off" placeholder="https://youtu.be/...">
+      <button class="slim ghost" id="btn-pl-add">Add</button>
+    </div>
+    <ul id="pl-vids" class="vid"></ul>
+    <button id="btn-pl-send">Play this list on the glasses</button>
+    <button class="ghost" id="btn-pl-close">Done</button>
+    <button class="ghost" id="btn-pl-del">Delete playlist</button>
+    <div id="pl-msg" class="msg"></div>
+  </div>
+</section>
+
+<section id="saved-card" hidden>
+  <h2>Saved videos</h2>
+  <p class="hint">Keep the ones you send often. Tap a row to send it.</p>
+  <ul id="saved" class="vid"></ul>
+  <label for="sname">Label</label>
+  <input id="sname" autocomplete="off" placeholder="Gym mix, commute, sleep...">
+  <label for="surl">YouTube link</label>
+  <input id="surl" type="url" autocomplete="off" placeholder="https://youtu.be/...">
+  <button id="btn-add">Add saved video</button>
+  <div id="saved-msg" class="msg"></div>
+</section>
+
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const CODE_KEY = 'glasstube.phone.code';
+const RECENTS_KEY = 'glasstube.phone.recents';
+const SAVED_KEY = 'glasstube.phone.saved';
+const PLAYLISTS_KEY = 'glasstube.phone.playlists';
+const CHANNELS = [
+  { name: 'TED Talks', url: 'https://www.youtube.com/channel/UCAuUUnT6oDeKwE6v1NGQxug' },
+  { name: 'NASA', url: 'https://www.youtube.com/channel/UCLA_DiR1FfKNvjuUpBHmylQ' },
+  { name: 'Veritasium', url: 'https://www.youtube.com/channel/UCHnyfMqiRRG1u-2MsSQLbXA' },
+  { name: 'Kurzgesagt', url: 'https://www.youtube.com/channel/UCsXVk37bltHxD1rDPwtNM8Q' },
+  { name: 'Vsauce', url: 'https://www.youtube.com/channel/UC6nSFpj9HTCZ5t-N3Rm3-HA' },
+  { name: 'MKBHD', url: 'https://www.youtube.com/channel/UCBJycsmduvYEL83R_U4JriQ' },
+];
+
+let code = '';
+let editPl = -1;
+let busy = false;
+
+function msg(el, text, kind) {
+  el.textContent = text || '';
+  el.className = 'msg' + (kind ? ' ' + kind : '');
+}
+
+function normCode(v) {
+  return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+}
+
+function loadList(key) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(raw) ? raw : [];
+  } catch (e) { return []; }
+}
+
+function saveList(key, list) {
+  try { localStorage.setItem(key, JSON.stringify(list.slice(0, 12))); }
+  catch (e) {}
+}
+
+function setPaired(on) {
+  $('#pair-form').hidden = on;
+  $('#pair-steps').hidden = on;
+  $('#pair-ok').hidden = !on;
+  $('#send-card').hidden = !on;
+  $('#quick-card').hidden = !on;
+  $('#recent-card').hidden = !on;
+  $('#saved-card').hidden = !on;
+  $('#playlist-card').hidden = !on;
+  $('#code-shown').textContent = code;
+  if (on) {
+    renderRecents();
+    renderSaved();
+    renderPlaylists();
+  }
+}
+
+function rememberVideo(video, url) {
+  if (!video || !video.id) return;
+  const item = {
+    id: video.id,
+    title: video.title || 'YouTube video',
+    channel: video.channel || '',
+    thumb: video.thumb || ('https://i.ytimg.com/vi/' + video.id + '/hqdefault.jpg'),
+    url: url || ('https://youtu.be/' + video.id),
+  };
+  const next = loadList(RECENTS_KEY).filter(v => v.id !== item.id);
+  next.unshift(item);
+  saveList(RECENTS_KEY, next);
+  renderRecents();
+}
+
+function renderVidList(node, items, emptyText, onSend, onRemove, onAdd) {
+  node.innerHTML = '';
+  if (!items.length) {
+    const p = document.createElement('div');
+    p.className = 'empty';
+    p.textContent = emptyText;
+    node.appendChild(p);
+    return;
+  }
+  items.forEach((v, i) => {
+    const li = document.createElement('li');
+    const img = document.createElement('img');
+    img.alt = '';
+    img.src = v.thumb || '';
+    li.appendChild(img);
+    const txt = document.createElement('div');
+    txt.className = 'txt';
+    const n = document.createElement('div');
+    n.className = 'n';
+    n.textContent = v.title || 'Video';
+    const a = document.createElement('div');
+    a.className = 'a';
+    a.textContent = v.channel || v.url || '';
+    txt.appendChild(n);
+    txt.appendChild(a);
+    li.appendChild(txt);
+    const send = document.createElement('button');
+    send.className = 'tiny';
+    send.textContent = 'Send';
+    send.addEventListener('click', ev => { ev.stopPropagation(); onSend(v); });
+    li.appendChild(send);
+    if (onAdd) {
+      const add = document.createElement('button');
+      add.className = 'tiny ghost';
+      add.textContent = 'Add';
+      add.addEventListener('click', ev => { ev.stopPropagation(); onAdd(v); });
+      li.appendChild(add);
+    }
+    if (onRemove) {
+      const del = document.createElement('button');
+      del.className = 'tiny ghost';
+      del.textContent = 'Remove';
+      del.addEventListener('click', ev => { ev.stopPropagation(); onRemove(i); });
+      li.appendChild(del);
+    }
+    li.addEventListener('click', () => onSend(v));
+    node.appendChild(li);
+  });
+}
+
+function renderRecents() {
+  renderVidList($('#recents'), loadList(RECENTS_KEY), 'Nothing sent yet.', sendVideo, null, addToPlaylist);
+}
+
+function renderSaved() {
+  renderVidList($('#saved'), loadList(SAVED_KEY), 'Nothing saved yet.', sendVideo, function (i) {
+    const list = loadList(SAVED_KEY);
+    list.splice(i, 1);
+    saveList(SAVED_KEY, list);
+    renderSaved();
+  }, addToPlaylist);
+}
+
+function expired(err) {
+  const s = String(err || '').toLowerCase();
+  return s.indexOf('expir') >= 0 || s.indexOf('not active') >= 0;
+}
+
+function isNetErr(e) {
+  return /failed to fetch|networkerror|offline|internet|load failed|not connected|HTTP 5|Server error 5/i
+    .test(String((e && e.message) || e || ''));
+}
+
+function netText(e) {
+  if (isNetErr(e)) return 'No internet. Retrying...';
+  return String((e && e.message) || e || 'Could not reach GlassTube.');
+}
+
+function postJSON(url, body) {
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(r => {
+    if (!r.ok) throw new Error('Server error ' + r.status);
+    return r.json();
+  });
+}
+
+function keepPost(url, body, onWait) {
+  return new Promise((resolve, reject) => {
+    function attempt() {
+      postJSON(url, body).then(resolve).catch(e => {
+        if (!isNetErr(e)) {
+          reject(e);
+          return;
+        }
+        if (onWait) onWait();
+        setTimeout(attempt, 3000);
+      });
+    }
+    attempt();
+  });
+}
+
+function playlists() {
+  return loadList(PLAYLISTS_KEY);
+}
+
+function savePlaylists(list) {
+  try { localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(list.slice(0, 12))); }
+  catch (e) {}
+}
+
+function renderPlaylists() {
+  const node = $('#pl-list');
+  const list = playlists();
+  node.innerHTML = '';
+  if (!list.length) {
+    const p = document.createElement('div');
+    p.className = 'empty';
+    p.textContent = 'No playlists yet.';
+    node.appendChild(p);
+    return;
+  }
+  list.forEach((p, i) => {
+    const li = document.createElement('li');
+    const top = document.createElement('div');
+    top.className = 'top';
+    const n = document.createElement('div');
+    n.className = 'n';
+    n.textContent = p.name + ' · ' + ((p.videos || []).length) + ' videos';
+    const open = document.createElement('button');
+    open.className = 'tiny ghost';
+    open.textContent = 'Edit';
+    open.addEventListener('click', ev => { ev.stopPropagation(); openPlaylist(i); });
+    const send = document.createElement('button');
+    send.className = 'tiny';
+    send.textContent = 'Play';
+    send.addEventListener('click', ev => { ev.stopPropagation(); sendPlaylist(i); });
+    top.appendChild(n);
+    top.appendChild(open);
+    top.appendChild(send);
+    li.appendChild(top);
+    node.appendChild(li);
+  });
+}
+
+function openPlaylist(i) {
+  const p = playlists()[i];
+  if (!p) return;
+  editPl = i;
+  $('#pl-editor').hidden = false;
+  $('#pl-edit-name').textContent = p.name;
+  renderPlVids();
+}
+
+function renderPlVids() {
+  const p = playlists()[editPl];
+  const node = $('#pl-vids');
+  if (!p) return;
+  const items = p.videos || [];
+  node.innerHTML = '';
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'Nothing in this list yet.';
+    node.appendChild(empty);
+    return;
+  }
+  items.forEach((v, i) => {
+    const li = document.createElement('li');
+    const img = document.createElement('img');
+    img.alt = '';
+    img.src = v.thumb || '';
+    li.appendChild(img);
+    const txt = document.createElement('div');
+    txt.className = 'txt';
+    const n = document.createElement('div');
+    n.className = 'n';
+    n.textContent = v.title || 'Video';
+    txt.appendChild(n);
+    li.appendChild(txt);
+    const up = document.createElement('button');
+    up.className = 'tiny ghost';
+    up.textContent = 'Up';
+    up.disabled = i === 0;
+    up.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const list = playlists();
+      const arr = list[editPl].videos;
+      const tmp = arr[i - 1];
+      arr[i - 1] = arr[i];
+      arr[i] = tmp;
+      savePlaylists(list);
+      renderPlVids();
+    });
+    const down = document.createElement('button');
+    down.className = 'tiny ghost';
+    down.textContent = 'Down';
+    down.disabled = i === items.length - 1;
+    down.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const list = playlists();
+      const arr = list[editPl].videos;
+      const tmp = arr[i + 1];
+      arr[i + 1] = arr[i];
+      arr[i] = tmp;
+      savePlaylists(list);
+      renderPlVids();
+    });
+    const del = document.createElement('button');
+    del.className = 'tiny ghost';
+    del.textContent = 'Remove';
+    del.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const list = playlists();
+      list[editPl].videos.splice(i, 1);
+      savePlaylists(list);
+      renderPlVids();
+      renderPlaylists();
+    });
+    li.appendChild(up);
+    li.appendChild(down);
+    li.appendChild(del);
+    node.appendChild(li);
+  });
+}
+
+function buzz() {
+  try { if (navigator.vibrate) navigator.vibrate(35); } catch (e) {}
+}
+
+function addToPlaylist(video) {
+  const list = playlists();
+  if (!list.length) {
+    msg($('#saved-msg'), 'Create a playlist first.', 'err');
+    return;
+  }
+  let i = editPl;
+  if (i < 0) i = 0;
+  if (!list[i].videos) list[i].videos = [];
+  if (list[i].videos.some(v => v.id === video.id || v.url === video.url)) {
+    msg($('#pl-msg'), 'Already in ' + list[i].name + '.', 'ok');
+    openPlaylist(i);
+    return;
+  }
+  list[i].videos.push(video);
+  savePlaylists(list);
+  openPlaylist(i);
+  renderPlaylists();
+  msg($('#pl-msg'), 'Added to ' + list[i].name + '.', 'ok');
+}
+
+function dropPair(reason) {
+  code = '';
+  try { localStorage.removeItem(CODE_KEY); } catch (e) {}
+  setPaired(false);
+  msg($('#pair-msg'), reason || 'Pair again. Open From phone on the glasses first.', 'err');
+  $('#code').focus();
+}
+
+function connect(c) {
+  const want = normCode(c);
+  if (want.length !== 6) {
+    msg($('#pair-msg'), 'Codes are six characters. Open From phone on the glasses to see yours.', 'err');
+    return;
+  }
+  msg($('#pair-msg'), 'Checking...');
+  keepPost('/api/pair', { code: want, touch: true }, () => {
+    msg($('#pair-msg'), 'No internet. Retrying...', 'err');
+  }).then(d => {
+    if (!d.ok) {
+      msg($('#pair-msg'), d.error || 'That code is not active. Open From phone on the glasses first.', 'err');
+      return;
+    }
+    code = want;
+    try { localStorage.setItem(CODE_KEY, code); } catch (e) {}
+    setPaired(true);
+    msg($('#pair-msg'), 'Connected.', 'ok');
+    $('#url').focus();
+  }).catch(e => msg($('#pair-msg'), netText(e), 'err'));
+}
+
+function sendVideo(item) {
+  const url = (item && (item.url || item.id))
+    ? (item.url || ('https://youtu.be/' + item.id))
+    : $('#url').value.trim();
+  if (!code) {
+    msg($('#send-msg'), 'Pair first. Open From phone on the glasses and type the code.', 'err');
+    return;
+  }
+  if (!url) {
+    msg($('#send-msg'), 'Paste a YouTube link first.', 'err');
+    return;
+  }
+  if (item && item.url) $('#url').value = item.url;
+  if (busy) return;
+  busy = true;
+  msg($('#send-msg'), 'Sending...');
+  keepPost('/api/push', { code: code, url: url }, () => {
+    msg($('#send-msg'), 'No internet. Retrying...', 'err');
+  }).then(d => {
+    busy = false;
+    if (!d.ok) {
+      if (expired(d.error)) {
+        dropPair(d.error);
+        msg($('#send-msg'), 'Pairing expired. Check the code on the glasses, then connect again.', 'err');
+        return;
+      }
+      msg($('#send-msg'), d.error || 'Could not send.', 'err');
+      return;
+    }
+    const v = d.video || {};
+    const many = d.videos && d.videos.length > 1;
+    $('#preview').hidden = false;
+    $('#prev-img').src = v.thumb || '';
+    $('#prev-title').textContent = v.title || 'Sent';
+    $('#prev-ch').textContent = many
+      ? ((d.name || 'Playlist') + ' · ' + d.videos.length + ' videos')
+      : (v.channel || '');
+    rememberVideo(v, url);
+    (d.videos || [v]).forEach(item => rememberVideo(item, item.url));
+    buzz();
+    msg($('#send-msg'), many
+      ? 'Sent ' + d.videos.length + ' videos. They play one after another on the glasses.'
+      : 'Sent "' + (v.title || 'video') + '". It should start on the glasses now.', 'ok');
+  }).catch(e => {
+    busy = false;
+    msg($('#send-msg'), netText(e), 'err');
+  });
+}
+
+function sendPlaylist(i) {
+  const p = playlists()[i];
+  if (!p || !(p.videos || []).length) {
+    msg($('#pl-msg'), 'Add at least one video first.', 'err');
+    return;
+  }
+  if (!code) {
+    msg($('#pl-msg'), 'Pair first.', 'err');
+    return;
+  }
+  if (busy) return;
+  busy = true;
+  msg($('#pl-msg'), 'Sending...');
+  keepPost('/api/push', { code: code, name: p.name, videos: p.videos }, () => {
+    msg($('#pl-msg'), 'No internet. Retrying...', 'err');
+  }).then(d => {
+    busy = false;
+    if (!d.ok) {
+      if (expired(d.error)) dropPair(d.error);
+      msg($('#pl-msg'), d.error || 'Could not send.', 'err');
+      return;
+    }
+    buzz();
+    msg($('#pl-msg'), 'Playing "' + p.name + '" on the glasses. ' + (d.videos || p.videos).length + ' videos.', 'ok');
+  }).catch(e => {
+    busy = false;
+    msg($('#pl-msg'), netText(e), 'err');
+  });
+}
+
+CHANNELS.forEach(ch => {
+  const b = document.createElement('button');
+  b.className = 'ghost';
+  b.textContent = ch.name;
+  b.addEventListener('click', () => sendVideo({ url: ch.url, title: ch.name }));
+  $('#chips').appendChild(b);
+});
+
+$('#btn-connect').addEventListener('click', () => connect($('#code').value));
+$('#code').addEventListener('keydown', e => { if (e.key === 'Enter') connect($('#code').value); });
+$('#btn-unpair').addEventListener('click', () => dropPair(''));
+$('#btn-send').addEventListener('click', () => sendVideo());
+$('#url').addEventListener('keydown', e => { if (e.key === 'Enter') sendVideo(); });
+$('#btn-paste').addEventListener('click', () => {
+  if (!navigator.clipboard || !navigator.clipboard.readText) {
+    msg($('#send-msg'), 'Paste into the box, then tap Send.', 'err');
+    return;
+  }
+  navigator.clipboard.readText().then(t => {
+    $('#url').value = String(t || '').trim();
+    $('#url').focus();
+  }).catch(() => msg($('#send-msg'), 'Allow paste, or drop the link in the box.', 'err'));
+});
+$('#btn-play-recents').addEventListener('click', () => {
+  const rec = loadList(RECENTS_KEY);
+  if (!rec.length) {
+    msg($('#send-msg'), 'Nothing in recents yet.', 'err');
+    return;
+  }
+  if (!code) {
+    msg($('#send-msg'), 'Pair first.', 'err');
+    return;
+  }
+  if (busy) return;
+  busy = true;
+  keepPost('/api/push', { code: code, name: 'Recents', videos: rec }, () => {
+    msg($('#send-msg'), 'No internet. Retrying...', 'err');
+  }).then(d => {
+    busy = false;
+    if (!d.ok) {
+      msg($('#send-msg'), d.error || 'Could not send.', 'err');
+      return;
+    }
+    buzz();
+    msg($('#send-msg'), 'Playing recents on the glasses.', 'ok');
+  }).catch(e => {
+    busy = false;
+    msg($('#send-msg'), netText(e), 'err');
+  });
+});
+
+$('#btn-pl-new').addEventListener('click', () => {
+  const name = $('#pl-name').value.trim();
+  if (!name) {
+    msg($('#pl-msg'), 'Name the playlist first.', 'err');
+    $('#pl-editor').hidden = false;
+    return;
+  }
+  const list = playlists();
+  list.unshift({ name: name, videos: [] });
+  savePlaylists(list);
+  $('#pl-name').value = '';
+  renderPlaylists();
+  openPlaylist(0);
+  msg($('#pl-msg'), 'Created. Add videos, then tap Play.', 'ok');
+});
+$('#btn-pl-add').addEventListener('click', () => {
+  if (editPl < 0) {
+    msg($('#pl-msg'), 'Create or open a playlist first.', 'err');
+    return;
+  }
+  const url = $('#pl-url').value.trim();
+  if (!url) {
+    msg($('#pl-msg'), 'Paste a YouTube link.', 'err');
+    return;
+  }
+  const list = playlists();
+  list[editPl].videos = list[editPl].videos || [];
+  list[editPl].videos.push({ title: url, url: url, channel: '', thumb: '', id: url });
+  savePlaylists(list);
+  $('#pl-url').value = '';
+  renderPlVids();
+  renderPlaylists();
+  msg($('#pl-msg'), 'Added. Titles fill in when you play the list.', 'ok');
+});
+$('#btn-pl-send').addEventListener('click', () => {
+  if (editPl < 0) return;
+  sendPlaylist(editPl);
+});
+$('#btn-pl-close').addEventListener('click', () => {
+  $('#pl-editor').hidden = true;
+  editPl = -1;
+});
+$('#btn-pl-del').addEventListener('click', () => {
+  if (editPl < 0) return;
+  const list = playlists();
+  list.splice(editPl, 1);
+  savePlaylists(list);
+  editPl = -1;
+  $('#pl-editor').hidden = true;
+  renderPlaylists();
+  msg($('#pl-msg'), 'Deleted.', 'ok');
+});
+$('#pl-url').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btn-pl-add').click(); });
+$('#pl-name').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btn-pl-new').click(); });
+
+$('#btn-add').addEventListener('click', () => {
+  const title = $('#sname').value.trim();
+  const url = $('#surl').value.trim();
+  if (!title || !url) {
+    msg($('#saved-msg'), 'Need a label and a YouTube link.', 'err');
+    return;
+  }
+  const list = loadList(SAVED_KEY);
+  list.unshift({ title: title, url: url, channel: '', thumb: '', id: title });
+  saveList(SAVED_KEY, list);
+  $('#sname').value = '';
+  $('#surl').value = '';
+  renderSaved();
+  msg($('#saved-msg'), 'Saved.', 'ok');
+});
+
+(function prefill() {
+  try {
+    const q = new URLSearchParams(location.search);
+    const incoming = q.get('url') || q.get('v') || '';
+    if (incoming) $('#url').value = incoming;
+  } catch (e) {}
+})();
+
+try {
+  const saved = localStorage.getItem(CODE_KEY);
+  if (saved) connect(saved);
+} catch (e) {}
+</script>
+</body>
+</html>
