@@ -14,11 +14,19 @@ export function parseYouTube(raw) {
   m = s.match(/\/(?:shorts|embed|live)\/([a-zA-Z0-9_-]{11})/);
   if (m) return { kind: 'video', id: m[1] };
 
+  m = s.match(/ytimg\.com\/vi\/([a-zA-Z0-9_-]{11})\//);
+  if (m) return { kind: 'video', id: m[1] };
+
   m = s.match(/youtube\.com\/channel\/(UC[a-zA-Z0-9_-]+)/);
   if (m) return { kind: 'channel', id: m[1] };
 
   m = s.match(/youtube\.com\/@([A-Za-z0-9._-]+)/);
   if (m) return { kind: 'handle', handle: m[1] };
+
+  if (s.charAt(0) === '@') {
+    const handle = s.slice(1).split(/[/?#]/)[0];
+    if (handle) return { kind: 'handle', handle: handle };
+  }
 
   const list = s.match(/[?&]list=([a-zA-Z0-9_-]+)/);
   const hasVid = /[?&]v=/.test(s) || /youtu\.be\/[a-zA-Z0-9_-]{11}/.test(s);
@@ -53,7 +61,11 @@ export async function resolveHandle(handle) {
   });
   if (!r.ok) return null;
   const html = await r.text();
-  const m = html.match(/"channelId":"(UC[a-zA-Z0-9_-]+)"/) ||
+  const m = html.match(/rel="canonical" href="https:\/\/www\.youtube\.com\/channel\/(UC[a-zA-Z0-9_-]+)"/) ||
+    html.match(/property="og:url" content="https:\/\/www\.youtube\.com\/channel\/(UC[a-zA-Z0-9_-]+)"/) ||
+    html.match(/"externalId":"(UC[a-zA-Z0-9_-]+)"/) ||
+    html.match(/"browseId":"(UC[a-zA-Z0-9_-]+)"/) ||
+    html.match(/"channelId":"(UC[a-zA-Z0-9_-]+)"/) ||
     html.match(/channel_id=(UC[a-zA-Z0-9_-]+)/);
   return m ? m[1] : null;
 }

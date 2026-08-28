@@ -11,7 +11,10 @@
 <link rel="apple-touch-icon" type="image/png" href="/apple-touch-icon.png?v=2" sizes="180x180">
 <link rel="preload" href="/icon-192.png?v=2" as="image">
 <meta name="theme-color" content="#000000">
-<link rel="stylesheet" href="/styles.css?v=6">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css?v=12">
 <script>
 (function () {
   function onPhone() {
@@ -80,20 +83,23 @@ window.addEventListener('unhandledrejection', function (e) {
 <div id="stage">
 
 <div id="splash" class="splash">
-  <img class="splash-icon" src="/icon-192.png?v=2" alt="GlassTube">
+  <span class="yt-mark" aria-hidden="true"></span>
   <div class="splash-name">GlassTube</div>
-  <div class="splash-tag">YouTube on glass</div>
+  <div class="splash-tag">Watch on your glasses</div>
   <div class="splash-credit">Sit still. Video overlays the real world.</div>
 </div>
 
 <div id="errbar" class="errbar hidden"></div>
 
 <section id="screen-home" class="screen">
-  <h1 class="title title-home"><img class="title-icon" src="/icon-192.png?v=2" alt="">GlassTube</h1>
+  <header class="yt-head">
+    <span class="yt-mark" aria-hidden="true"></span>
+    <h1 class="title title-home">GlassTube</h1>
+  </header>
   <div class="list list-home screen-body">
     <button class="focusable menu-btn hidden" id="btn-continue" data-menu="continue">Continue<small id="continue-sub"></small></button>
     <button class="focusable menu-btn" data-menu="recents">Recents</button>
-    <button class="focusable menu-btn" data-menu="channels">Channels</button>
+    <button class="focusable menu-btn" data-menu="channels">Channels<small>Your list from the phone</small></button>
     <button class="focusable menu-btn" data-menu="playlists">Playlists<small>Lists you sent from the phone</small></button>
     <button class="focusable menu-btn" data-menu="phone">From phone<small>Paste a YouTube link on your iPhone</small></button>
     <button class="focusable menu-btn" data-menu="settings">Settings</button>
@@ -108,21 +114,28 @@ window.addEventListener('unhandledrejection', function (e) {
 </section>
 
 <section id="screen-player" class="screen screen-flush hidden">
-  <div id="player-title">Loading...</div>
-  <div id="player-channel"></div>
   <div id="yt-wrap">
     <div id="yt-slot"><div id="yt-host"></div></div>
     <img id="yt-poster" alt="">
+    <div id="player-bar"><div id="player-fill"></div></div>
+    <div id="player-time">0:00 / 0:00</div>
+    <div id="load-gate" class="load-gate">
+      <div class="load-spin"></div>
+      <div id="load-gate-title" class="load-gate-title">YouTube video</div>
+      <div id="load-gate-msg" class="load-gate-msg">Loading...</div>
+    </div>
+    <div id="play-gate" class="play-gate hidden">
+      <div id="play-gate-title" class="play-gate-title"></div>
+      <div id="play-gate-msg" class="play-gate-msg">Enter to play</div>
+    </div>
   </div>
-  <div id="player-time">0:00 / 0:00</div>
-  <div id="player-bar"><div id="player-fill"></div></div>
-  <div id="player-next"></div>
-  <div id="player-hint">Enter play · Left back · Right +10s · Up -10s · Down next</div>
-  <div id="play-gate" class="play-gate hidden">
-    <div id="play-gate-title" class="play-gate-title"></div>
-    <div id="play-gate-msg" class="play-gate-msg">Enter to play</div>
+  <div class="player-meta">
+    <div id="player-title">Loading...</div>
+    <div id="player-channel"></div>
+    <div id="player-next"></div>
+    <div id="player-hint">Enter play · Up last · Down next · Left back · Right +10s</div>
+    <div id="player-error" class="hidden"></div>
   </div>
-  <div id="player-error" class="hidden"></div>
 </section>
 
 <section id="screen-phone" class="screen hidden">
@@ -169,10 +182,10 @@ window.addEventListener('unhandledrejection', function (e) {
 
 <div id="status" class="status hidden"></div>
 
-<script src="/sound.js?v=6"></script>
-<script src="/prefs.js?v=6"></script>
-<script src="/player.js?v=6"></script>
-<script src="/app.js?v=6"></script>
+<script src="/sound.js?v=7"></script>
+<script src="/prefs.js?v=7"></script>
+<script src="/player.js?v=9"></script>
+<script src="/app.js?v=11"></script>
 </div>
 </body>
 </html>

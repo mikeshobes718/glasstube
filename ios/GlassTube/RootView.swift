@@ -24,6 +24,7 @@ enum GlassPage: String, CaseIterable, Identifiable {
 struct RootView: View {
     @State private var page: GlassPage = .phone
     @State private var pendingWatch: String?
+    @State private var authBlob = ""
     @State private var reloadToken: [GlassPage: Int] = [.phone: 0, .hud: 0]
     @State private var ready: [GlassPage: Bool] = [.phone: false, .hud: false]
 
@@ -78,7 +79,7 @@ struct RootView: View {
                 .background(Color.black)
 
             ZStack {
-                WebScreen(url: phoneURL, reloadToken: reloadToken[.phone, default: 0]) {
+                WebScreen(url: phoneURL, reloadToken: reloadToken[.phone, default: 0], authBlob: authBlob) {
                     ready[.phone] = true
                 }
                 .opacity(page == .phone ? 1 : 0)
@@ -96,6 +97,14 @@ struct RootView: View {
         }
         .background(Color.black.ignoresSafeArea())
         .onOpenURL { incoming in
+            if incoming.scheme == "glasstube" && incoming.host == "oauth" {
+                let items = URLComponents(url: incoming, resolvingAgainstBaseURL: false)?.queryItems
+                if let blob = items?.first(where: { $0.name == "s" })?.value, !blob.isEmpty {
+                    authBlob = blob
+                    page = .phone
+                }
+                return
+            }
             if let watch = watchURL(from: incoming) {
                 pendingWatch = watch
                 page = .phone

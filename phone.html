@@ -4,21 +4,26 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="description" content="Send a YouTube link to GlassTube on Meta Ray-Ban Display glasses">
-<meta name="theme-color" content="#0b1116">
+<meta name="theme-color" content="#ffffff">
 <title>GlassTube phone</title>
 <link rel="icon" type="image/png" href="/icon-192.png?v=2">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" sizes="180x180">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #f4f7f9;
+  --bg: #fff;
   --card: #fff;
-  --ink: #10242e;
-  --muted: #5d7784;
-  --line: #dde6ea;
-  --accent: #007a99;
+  --ink: #0f0f0f;
+  --muted: #606060;
+  --line: #e5e5e5;
+  --chip: #f2f2f2;
+  --accent: #0f0f0f;
   --accent-ink: #fff;
-  --good: #0b7a4b;
-  --bad: #b3261e;
+  --good: #065fd4;
+  --bad: #c00;
+  --red: #ff0000;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 [hidden] { display: none !important; }
@@ -26,115 +31,229 @@ html, body { margin: 0; padding: 0; }
 body {
   background: var(--bg);
   color: var(--ink);
-  font: 17px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  padding: 0 0 48px;
+  font: 14px/1.4 Roboto, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, sans-serif;
+  padding: 0 0 56px;
 }
 header {
-  padding: 22px 20px 16px;
-  background: #0b1116;
-  color: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 8px 16px;
+  background: #fff;
 }
 .brand { display: flex; align-items: center; gap: 12px; }
-.brand img {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: #0a1016;
+.brand img { display: none; }
+.yt-mark {
+  width: 36px;
+  height: 26px;
+  background: var(--red);
+  border-radius: 8px;
+  position: relative;
   flex: 0 0 auto;
 }
-header h1 { margin: 0; font-size: 22px; letter-spacing: 0.2px; }
-header p { margin: 4px 0 0; font-size: 14px; color: #8fd8ff; }
-main { padding: 16px; max-width: 620px; margin: 0 auto; }
+.yt-mark::after {
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 6px;
+  border-style: solid;
+  border-width: 7px 0 7px 12px;
+  border-color: transparent transparent transparent #fff;
+}
+header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.2px; }
+header p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+main { padding: 0; max-width: 620px; margin: 0 auto; }
 section {
   background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 16px;
-  margin-bottom: 16px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 20px 16px 24px;
+  margin-bottom: 0;
 }
-h2 { margin: 0 0 4px; font-size: 17px; }
-.hint { margin: 0 0 12px; font-size: 14px; color: var(--muted); }
-.steps { margin: 0 0 14px; padding-left: 22px; color: var(--ink); font-size: 15px; }
-.steps li { margin: 6px 0; }
-label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin: 12px 0 6px; }
+h2 { margin: 0 0 6px; font-size: 20px; font-weight: 700; letter-spacing: -0.2px; }
+.hint { margin: 0 0 14px; font-size: 14px; color: var(--muted); }
+.steps { margin: 0 0 16px; padding-left: 20px; color: var(--ink); font-size: 14px; }
+.steps li { margin: 8px 0; }
+label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin: 16px 0 8px; }
 input {
   width: 100%;
-  padding: 13px 14px;
-  font-size: 17px;
+  padding: 10px 16px;
+  font-size: 16px;
   font-family: inherit;
   color: var(--ink);
-  background: #fbfdfe;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  background: var(--chip);
+  border: 0;
+  border-radius: 20px;
 }
-input:focus { outline: none; border-color: var(--accent); background: #fff; }
-#code { text-transform: uppercase; letter-spacing: 5px; font-size: 24px; font-weight: 700; text-align: center; }
+input:focus { outline: none; background: #ebebeb; }
+#code { text-transform: uppercase; letter-spacing: 8px; font-size: 28px; font-weight: 700; text-align: center; height: 56px; }
 button {
   width: 100%;
-  min-height: 50px;
+  min-height: 40px;
   margin-top: 12px;
-  padding: 12px 16px;
-  font: 600 17px/1.2 inherit;
+  padding: 10px 16px;
+  font: 600 14px/1.2 inherit;
   color: var(--accent-ink);
   background: var(--accent);
   border: 0;
-  border-radius: 10px;
+  border-radius: 20px;
   cursor: pointer;
 }
-button.ghost { color: var(--accent); background: #eaf4f7; }
-button.slim { min-height: 40px; width: auto; padding: 8px 14px; margin: 0; font-size: 15px; }
-button.tiny { min-height: 34px; width: auto; padding: 6px 10px; margin: 0; font-size: 14px; }
-.row { display: flex; gap: 10px; }
+button.ghost { color: var(--ink); background: var(--chip); }
+button.slim { min-height: 36px; width: auto; padding: 8px 14px; margin: 0; font-size: 14px; }
+button.tiny { min-height: 32px; width: auto; padding: 6px 12px; margin: 0; font-size: 13px; border-radius: 16px; }
+.row { display: flex; gap: 8px; align-items: center; }
 .row input { flex: 1; }
 .paired {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; padding: 12px 14px; border-radius: 10px;
-  background: #eef8f3; border: 1px solid #c9e7d8;
+  gap: 12px; padding: 12px 0;
 }
-.paired b { font-size: 22px; letter-spacing: 4px; }
+.paired b { font-size: 20px; letter-spacing: 3px; }
 .preview {
   display: flex; gap: 12px; align-items: center;
-  margin-top: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 10px;
+  margin-top: 14px; padding: 0;
 }
-.preview img { width: 120px; height: 68px; object-fit: cover; border-radius: 8px; background: #111; }
+.preview img { width: 168px; height: 94px; object-fit: cover; border-radius: 12px; background: #0f0f0f; }
 .preview .t { font-weight: 600; }
-.preview .c { font-size: 14px; color: var(--muted); }
-.msg { margin-top: 12px; font-size: 15px; min-height: 22px; }
+.preview .c { font-size: 13px; color: var(--muted); }
+.msg { margin-top: 10px; font-size: 14px; min-height: 20px; }
 .msg.ok { color: var(--good); }
 .msg.err { color: var(--bad); }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .chips button {
   width: auto;
-  min-height: 40px;
+  min-height: 36px;
   margin: 0;
-  padding: 8px 12px;
-  font-size: 15px;
+  padding: 8px 14px;
+  font-size: 14px;
+  background: var(--chip);
+  color: var(--ink);
 }
 .vid { list-style: none; margin: 0; padding: 0; }
 .vid li {
-  display: flex; align-items: center; gap: 10px;
-  padding: 12px 0; border-bottom: 1px solid var(--line);
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 0; border-bottom: 0;
 }
-.vid img { width: 96px; height: 54px; object-fit: cover; border-radius: 8px; background: #111; flex: 0 0 auto; }
-.vid .txt { flex: 1; min-width: 0; }
-.vid .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vid .a { font-size: 14px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.empty { color: var(--muted); font-size: 15px; padding: 10px 0; }
+.vid img { width: 168px; height: 94px; object-fit: cover; border-radius: 12px; background: #0f0f0f; display: block; }
+.vid .thumb-wrap { position: relative; flex: 0 0 auto; width: 168px; }
+.vid .dur {
+  position: absolute; right: 4px; bottom: 4px;
+  background: rgba(0, 0, 0, 0.8); color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 1.2;
+  padding: 2px 5px; border-radius: 4px;
+}
+.vid .dur.live { background: #c00; }
+.vid .txt { flex: 1; min-width: 0; padding-top: 2px; }
+.vid .n { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
+.vid .a { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+.vid .m { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+.empty { color: var(--muted); font-size: 14px; padding: 16px 0; }
 .pl { list-style: none; margin: 0; padding: 0; }
-.pl > li { padding: 12px 0; border-bottom: 1px solid var(--line); }
-.pl .top { display: flex; align-items: center; gap: 10px; }
-.pl .n { font-weight: 600; flex: 1; }
-#pl-editor { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
-#pl-editor h3 { margin: 0 0 8px; font-size: 16px; }
+.pl > li { padding: 14px 0; border-bottom: 0; }
+.pl .top { display: flex; align-items: center; gap: 12px; }
+.pl .n { font-weight: 600; flex: 1; font-size: 15px; }
+.pl .cover {
+  width: 56px; height: 56px; object-fit: cover;
+  border-radius: 8px; background: #0f0f0f; flex: 0 0 auto;
+}
+.pl .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.cap {
+  max-height: 28.5rem;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  border: 0;
+  border-radius: 0;
+  margin-top: 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cap::before, .cap::after {
+  content: '';
+  flex: 0 0 8px;
+  height: 8px;
+  min-height: 8px;
+  pointer-events: none;
+}
+.vid.cap { max-height: 30.5rem; }
+.cap > :last-child { border-bottom: 0; }
+.list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 24px 0 10px;
+  font-size: 18px;
+  font-weight: 700;
+}
+.list-head .fold-meta {
+  margin: 0;
+  padding: 6px 12px;
+  background: var(--chip);
+  color: var(--ink);
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+#pl-editor { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+#pl-editor h3 { margin: 0 0 10px; font-size: 18px; font-weight: 700; }
+h3 { margin: 20px 0 10px; font-size: 18px; font-weight: 700; }
+.fold { margin-top: 14px; }
+.fold-head {
+  width: 100%;
+  min-height: 40px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  background: var(--chip);
+  color: var(--ink);
+  border: 0;
+}
+.fold-kicker { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.fold-title { font-size: 15px; }
+.fold-meta { font-size: 13px; color: var(--muted); font-weight: 600; }
+.fold-chev { font-size: 15px; color: var(--muted); flex: 0 0 auto; }
+.fold-body { padding: 10px 0 0; }
+.fold-tools { margin-top: 10px; }
+button.on { background: var(--ink); color: #fff; }
+#yt-open-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin: 20px 0 10px;
+}
+#yt-open-head h3 { margin: 0; flex: 1; font-size: 18px; font-weight: 700; }
+.who { display: flex; gap: 16px; align-items: center; margin: 8px 0 16px; }
+.who img { width: 72px; height: 72px; border-radius: 50%; background: var(--chip); object-fit: cover; }
+.who .n { font-weight: 700; font-size: 22px; letter-spacing: -0.2px; }
+.who .a { font-size: 14px; color: var(--muted); margin-top: 2px; }
+button.google {
+  background: #fff;
+  color: #1f1f1f;
+  border: 1px solid #dadce0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.gmark {
+  width: 18px; height: 18px; flex: 0 0 auto;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath fill='%23EA4335' d='M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z'/%3E%3Cpath fill='%234285F4' d='M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z'/%3E%3Cpath fill='%23FBBC05' d='M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z'/%3E%3Cpath fill='%2334A853' d='M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z'/%3E%3C/svg%3E") center/18px no-repeat;
+}
+#acct-in #btn-logout { width: auto; }
 </style>
 </head>
 <body>
 <header>
   <div class="brand">
-    <img src="/icon-192.png?v=2" alt="GlassTube">
+    <span class="yt-mark" aria-hidden="true"></span>
+    <img src="/icon-192.png?v=2" alt="">
     <div>
-      <h1>GlassTube phone</h1>
-      <p>Paste here, watch there.</p>
+      <h1>GlassTube</h1>
+      <p>Send to your glasses</p>
     </div>
   </div>
 </header>
@@ -159,12 +278,66 @@ button.tiny { min-height: 34px; width: auto; padding: 6px 10px; margin: 0; font-
   <div id="pair-msg" class="msg"></div>
 </section>
 
+<section id="account-card">
+  <h2>YouTube account</h2>
+  <div id="acct-out">
+    <p class="hint">Sign in to load your subscriptions, Liked videos, Watch Later, and YouTube playlists. Search uses your account too.</p>
+    <button type="button" id="btn-google" class="google"><span class="gmark"></span>Continue with Google</button>
+  </div>
+  <div id="acct-in" hidden>
+    <div class="who">
+      <img id="acct-pic" alt="">
+      <div>
+        <div class="n" id="acct-name"></div>
+        <div class="a" id="acct-email"></div>
+      </div>
+    </div>
+    <button class="ghost" id="btn-logout">Sign out</button>
+  </div>
+  <div id="acct-msg" class="msg"></div>
+</section>
+
+<section id="library-card" hidden>
+  <h2>Your YouTube</h2>
+  <p class="hint">Search or open a list, then send it to the glasses. Pairing above still has to be connected.</p>
+  <div class="row">
+    <input id="yt-q" autocomplete="off" placeholder="Search YouTube">
+    <button class="slim" id="btn-yt-search">Search</button>
+    <button class="slim ghost" id="btn-yt-clear" hidden>Clear</button>
+  </div>
+  <div id="lib-msg" class="msg"></div>
+  <ul id="yt-search" class="vid cap"></ul>
+  <div id="yt-special" class="pl"></div>
+  <div id="yt-open" hidden>
+    <div id="yt-open-head">
+      <h3 id="yt-open-name"></h3>
+      <button class="slim ghost" id="btn-yt-open-close">Close</button>
+    </div>
+    <button class="slim" id="btn-yt-open-play">Play this list on the glasses</button>
+    <ul id="yt-open-vids" class="vid cap"></ul>
+  </div>
+  <h3 class="list-head">Your playlists <span class="fold-meta" id="pls-meta">0</span></h3>
+  <div class="row">
+    <input id="pls-q" autocomplete="off" placeholder="Find a playlist">
+    <button type="button" class="slim ghost" id="btn-pls-az">A-Z</button>
+  </div>
+  <ul id="yt-pls" class="pl cap"></ul>
+  <h3 class="list-head">Subscriptions <span class="fold-meta" id="subs-meta">0</span></h3>
+  <div class="row">
+    <input id="subs-q" autocomplete="off" placeholder="Find a channel">
+    <button type="button" class="slim ghost" id="btn-subs-az">A-Z</button>
+  </div>
+  <button class="ghost" id="btn-subs-import">Add all subscriptions to Quick channels</button>
+  <ul id="yt-subs" class="pl cap"></ul>
+</section>
+
 <section id="send-card" hidden>
   <h2>Send a video</h2>
   <p class="hint">Paste a youtube.com, youtu.be, or playlist link. A playlist plays through on the glasses by itself.</p>
   <div class="row">
     <input id="url" type="url" autocomplete="off" placeholder="https://youtu.be/...">
     <button class="slim ghost" id="btn-paste">Paste</button>
+    <button class="slim ghost" id="btn-url-clear" hidden>Clear</button>
   </div>
   <button id="btn-send">Send to the glasses</button>
   <div id="preview" hidden class="preview">
@@ -179,15 +352,26 @@ button.tiny { min-height: 34px; width: auto; padding: 6px 10px; margin: 0; font-
 
 <section id="quick-card" hidden>
   <h2>Quick channels</h2>
-  <p class="hint">Sends the latest video from that channel.</p>
-  <div class="chips" id="chips"></div>
+  <p class="hint">Yours, not ours. Tap Play for the newest upload. Play 6 sends the latest uploads as a list. Open shows that channel on the glasses without starting a video. This list also appears under Channels on the glasses.</p>
+  <div class="row">
+    <input id="ch-q" autocomplete="off" placeholder="Find a channel">
+    <button type="button" class="slim ghost" id="btn-ch-az">A-Z</button>
+  </div>
+  <ul id="ch-list" class="pl cap"></ul>
+  <label for="ch-url">Add a channel</label>
+  <div class="row">
+    <input id="ch-url" autocomplete="off" placeholder="youtube.com/@name or channel link">
+    <button class="slim" id="btn-ch-add">Add</button>
+    <button class="slim ghost" id="btn-ch-clear" hidden>Clear</button>
+  </div>
+  <div id="ch-msg" class="msg"></div>
 </section>
 
 <section id="recent-card" hidden>
   <h2>Recently sent</h2>
   <p class="hint">Tap one to send it again, or play the whole list.</p>
   <button class="ghost" id="btn-play-recents">Play recents on the glasses</button>
-  <ul id="recents" class="vid"></ul>
+  <ul id="recents" class="vid cap"></ul>
 </section>
 
 <section id="playlist-card" hidden>
@@ -198,17 +382,20 @@ button.tiny { min-height: 34px; width: auto; padding: 6px 10px; margin: 0; font-
     <input id="pl-name" autocomplete="off" placeholder="Gym, commute, sleep...">
     <button class="slim" id="btn-pl-new">Create</button>
   </div>
-  <ul id="pl-list" class="pl"></ul>
+  <div class="row fold-tools">
+    <input id="home-pl-q" autocomplete="off" placeholder="Find a playlist">
+  </div>
+  <ul id="pl-list" class="pl cap"></ul>
+  <div id="pl-list-msg" class="msg"></div>
   <div id="pl-editor" hidden>
     <h3 id="pl-edit-name"></h3>
     <div class="row">
       <input id="pl-url" type="url" autocomplete="off" placeholder="https://youtu.be/...">
       <button class="slim ghost" id="btn-pl-add">Add</button>
     </div>
-    <ul id="pl-vids" class="vid"></ul>
+    <ul id="pl-vids" class="vid cap"></ul>
     <button id="btn-pl-send">Play this list on the glasses</button>
     <button class="ghost" id="btn-pl-close">Done</button>
-    <button class="ghost" id="btn-pl-del">Delete playlist</button>
     <div id="pl-msg" class="msg"></div>
   </div>
 </section>
@@ -216,11 +403,14 @@ button.tiny { min-height: 34px; width: auto; padding: 6px 10px; margin: 0; font-
 <section id="saved-card" hidden>
   <h2>Saved videos</h2>
   <p class="hint">Keep the ones you send often. Tap a row to send it.</p>
-  <ul id="saved" class="vid"></ul>
+  <ul id="saved" class="vid cap"></ul>
   <label for="sname">Label</label>
   <input id="sname" autocomplete="off" placeholder="Gym mix, commute, sleep...">
   <label for="surl">YouTube link</label>
-  <input id="surl" type="url" autocomplete="off" placeholder="https://youtu.be/...">
+  <div class="row">
+    <input id="surl" type="url" autocomplete="off" placeholder="https://youtu.be/...">
+    <button class="slim ghost" id="btn-saved-paste">Paste</button>
+  </div>
   <button id="btn-add">Add saved video</button>
   <div id="saved-msg" class="msg"></div>
 </section>
@@ -232,13 +422,15 @@ const CODE_KEY = 'glasstube.phone.code';
 const RECENTS_KEY = 'glasstube.phone.recents';
 const SAVED_KEY = 'glasstube.phone.saved';
 const PLAYLISTS_KEY = 'glasstube.phone.playlists';
-const CHANNELS = [
-  { name: 'TED Talks', url: 'https://www.youtube.com/channel/UCAuUUnT6oDeKwE6v1NGQxug' },
-  { name: 'NASA', url: 'https://www.youtube.com/channel/UCLA_DiR1FfKNvjuUpBHmylQ' },
-  { name: 'Veritasium', url: 'https://www.youtube.com/channel/UCHnyfMqiRRG1u-2MsSQLbXA' },
-  { name: 'Kurzgesagt', url: 'https://www.youtube.com/channel/UCsXVk37bltHxD1rDPwtNM8Q' },
-  { name: 'Vsauce', url: 'https://www.youtube.com/channel/UC6nSFpj9HTCZ5t-N3Rm3-HA' },
-  { name: 'MKBHD', url: 'https://www.youtube.com/channel/UCBJycsmduvYEL83R_U4JriQ' },
+const CHANNELS_KEY = 'glasstube.phone.channels';
+const SESSION_KEY = 'glasstube.phone.google';
+const DEFAULT_CHANNELS = [
+  { name: 'TED Talks', id: 'UCAuUUnT6oDeKwE6v1NGQxug' },
+  { name: 'NASA', id: 'UCLA_DiR1FfKNvjuUpBHmylQ' },
+  { name: 'Veritasium', id: 'UCHnyfMqiRRG1u-2MsSQLbXA' },
+  { name: 'Kurzgesagt', id: 'UCsXVk37bltHxD1rDPwtNM8Q' },
+  { name: 'Vsauce', id: 'UC6nSFpj9HTCZ5t-N3Rm3-HA' },
+  { name: 'MKBHD', id: 'UCBJycsmduvYEL83R_U4JriQ' },
 ];
 
 let code = '';
@@ -280,7 +472,404 @@ function setPaired(on) {
     renderRecents();
     renderSaved();
     renderPlaylists();
+    renderChannels();
+    hydratePlaylists();
+    syncChannels();
+    refreshAccount();
   }
+}
+
+function sessionToken() {
+  try { return localStorage.getItem(SESSION_KEY) || ''; } catch (e) { return ''; }
+}
+
+function setSession(t) {
+  try {
+    if (t) localStorage.setItem(SESSION_KEY, t);
+    else localStorage.removeItem(SESSION_KEY);
+  } catch (e) {}
+}
+
+function nativeGoogle() {
+  return !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.glasstube);
+}
+
+function startGoogle() {
+  msg($('#acct-msg'), 'Opening Google...', '');
+  if (nativeGoogle()) {
+    window.webkit.messageHandlers.glasstube.postMessage({ type: 'google-auth' });
+    return;
+  }
+  location.href = '/api/auth/google?n=web';
+}
+
+function authFetch(url) {
+  const t = sessionToken();
+  if (!t) return Promise.resolve({ ok: false, auth: false, error: 'Sign in with Google first.' });
+  return fetch(url, { headers: { Authorization: 'Bearer ' + t } }).then(r => {
+    const rotated = r.headers.get('X-GlassTube-Session');
+    if (rotated) setSession(rotated);
+    return r.json();
+  });
+}
+
+function showSignedOut() {
+  $('#acct-out').hidden = false;
+  $('#acct-in').hidden = true;
+  $('#library-card').hidden = true;
+}
+
+function showSignedIn(me) {
+  $('#acct-out').hidden = true;
+  $('#acct-in').hidden = false;
+  $('#acct-name').textContent = (me && me.name) || 'YouTube';
+  $('#acct-email').textContent = (me && me.email) || '';
+  $('#acct-pic').src = (me && me.picture) || '/icon-192.png?v=2';
+  $('#library-card').hidden = false;
+}
+
+function refreshAccount() {
+  if (!sessionToken()) {
+    showSignedOut();
+    return;
+  }
+  authFetch('/api/auth/me').then(d => {
+    if (!d || !d.ok || d.auth === false) {
+      setSession('');
+      showSignedOut();
+      if (d && d.error && /sign in/i.test(d.error) === false) msg($('#acct-msg'), d.error, 'err');
+      return;
+    }
+    showSignedIn(d.me);
+    msg($('#acct-msg'), '', '');
+    loadLibrary();
+  }).catch(() => showSignedOut());
+}
+
+let lib = { playlists: [], subscriptions: [], likes: [], watchLater: [], uploads: [] };
+let openList = { name: '', videos: [] };
+let libUi = { plsAz: false, subsAz: false, chAz: false };
+
+function videoWord(n) {
+  const c = Number(n) || 0;
+  return c + (c === 1 ? ' video' : ' videos');
+}
+
+function nameMatch(name, q) {
+  const needle = String(q || '').trim().toLowerCase();
+  if (!needle) return true;
+  return String(name || '').toLowerCase().indexOf(needle) >= 0;
+}
+
+function byName(items) {
+  return items.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
+}
+
+function syncClearBtn(input, btn) {
+  if (!input || !btn) return;
+  btn.hidden = !String(input.value || '').trim();
+}
+
+function loadLibrary() {
+  msg($('#lib-msg'), 'Loading your YouTube...', '');
+  authFetch('/api/yt/library').then(d => {
+    if (!d || d.auth === false) {
+      setSession('');
+      showSignedOut();
+      return;
+    }
+    if (!d.ok) {
+      msg($('#lib-msg'), d.error || 'Could not load your YouTube.', 'err');
+      return;
+    }
+    lib = d;
+    if (d.me) showSignedIn(d.me);
+    renderLibrary();
+    msg($('#lib-msg'), '', '');
+  }).catch(e => msg($('#lib-msg'), netText(e), 'err'));
+}
+
+function renderLibrary() {
+  const spec = $('#yt-special');
+  spec.innerHTML = '';
+  spec.appendChild(specialRow('Liked videos', lib.likes || [], lib.likesId, lib.likesError));
+  spec.appendChild(specialRow('Watch Later', lib.watchLater || [], lib.watchLaterId, lib.watchLaterError));
+  spec.appendChild(specialRow('Your uploads', lib.uploads || [], lib.uploadsId, lib.uploadsError));
+  renderYtPlaylists();
+  renderYtSubs();
+}
+
+function renderYtPlaylists() {
+  const all = lib.playlists || [];
+  const q = $('#pls-q') ? $('#pls-q').value : '';
+  let rows = all.filter(p => nameMatch(p.name, q));
+  if (libUi.plsAz) rows = byName(rows);
+  $('#pls-meta').textContent = all.length
+    ? ((q.trim() ? (rows.length + ' of ' + all.length) : String(all.length)) + (rows.length > 5 ? ' · scroll' : ''))
+    : 'None';
+  const node = $('#yt-pls');
+  node.innerHTML = '';
+  if (!all.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'No YouTube playlists on this account.';
+    node.appendChild(empty);
+    node.scrollTop = 0;
+    return;
+  }
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'No playlist matches that.';
+    node.appendChild(empty);
+    node.scrollTop = 0;
+    return;
+  }
+  rows.forEach(p => node.appendChild(ytListRow(p.name, videoWord(p.count), () => openYtPlaylist(p.id, p.name), () => playYtPlaylist(p.id, p.name))));
+  node.scrollTop = 0;
+}
+
+function renderYtSubs() {
+  const all = lib.subscriptions || [];
+  const q = $('#subs-q') ? $('#subs-q').value : '';
+  let rows = all.filter(s => nameMatch(s.name, q));
+  if (libUi.subsAz) rows = byName(rows);
+  $('#subs-meta').textContent = all.length
+    ? ((q.trim() ? (rows.length + ' of ' + all.length) : String(all.length)) + (rows.length > 5 ? ' · scroll' : ''))
+    : 'None';
+  const node = $('#yt-subs');
+  node.innerHTML = '';
+  if (!all.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'No subscriptions, or YouTube hid them.';
+    node.appendChild(empty);
+    node.scrollTop = 0;
+    return;
+  }
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'No channel matches that.';
+    node.appendChild(empty);
+    node.scrollTop = 0;
+    return;
+  }
+  rows.forEach(s => {
+    const li = document.createElement('li');
+    const top = document.createElement('div');
+    top.className = 'top';
+    if (s.thumb) {
+      const img = document.createElement('img');
+      img.className = 'cover';
+      img.alt = '';
+      img.src = s.thumb;
+      top.appendChild(img);
+    }
+    const n = document.createElement('div');
+    n.className = 'n';
+    n.textContent = s.name;
+    top.appendChild(n);
+    const acts = document.createElement('div');
+    acts.className = 'acts';
+    function addBtn(label, ghost, fn) {
+      const btn = document.createElement('button');
+      btn.className = ghost ? 'tiny ghost' : 'tiny';
+      btn.textContent = label;
+      btn.addEventListener('click', ev => { ev.stopPropagation(); fn(); });
+      acts.appendChild(btn);
+    }
+    addBtn('Play', false, () => sendChannelLatest(s));
+    addBtn('Play 6', true, () => sendChannelLatest(s, 6));
+    addBtn('Open', true, () => browseChannel(s));
+    addBtn('Add', true, () => {
+      const list = loadChannels();
+      if (list.some(c => c.id === s.id)) {
+        msg($('#lib-msg'), s.name + ' is already in Quick channels.', 'ok');
+        return;
+      }
+      list.push({ name: s.name, id: s.id, url: s.url });
+      saveChannels(list);
+      renderChannels();
+      syncChannels();
+      msg($('#lib-msg'), 'Added ' + s.name + ' to Quick channels.', 'ok');
+    });
+    li.appendChild(top);
+    li.appendChild(acts);
+    node.appendChild(li);
+  });
+  node.scrollTop = 0;
+}
+
+function specialRow(name, videos, playlistId, err) {
+  const li = document.createElement('li');
+  const top = document.createElement('div');
+  top.className = 'top';
+  const n = document.createElement('div');
+  n.className = 'n';
+  n.textContent = name + ' · ' + (videos.length ? (videos.length + '+') : '0');
+  top.appendChild(n);
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  if (err && !videos.length) {
+    const p = document.createElement('div');
+    p.className = 'empty';
+    p.textContent = err;
+    li.appendChild(top);
+    li.appendChild(p);
+    return li;
+  }
+  function addBtn(label, ghost, fn) {
+    const btn = document.createElement('button');
+    btn.className = ghost ? 'tiny ghost' : 'tiny';
+    btn.textContent = label;
+    btn.addEventListener('click', ev => { ev.stopPropagation(); fn(); });
+    acts.appendChild(btn);
+  }
+  addBtn('View', true, () => {
+    if (videos.length) showOpenList(name, videos);
+    else if (playlistId) openYtPlaylist(playlistId, name);
+  });
+  addBtn('Play', false, () => {
+    if (videos.length) sendYtVideos(name, videos);
+    else if (playlistId) playYtPlaylist(playlistId, name);
+  });
+  li.appendChild(top);
+  li.appendChild(acts);
+  return li;
+}
+
+function ytListRow(name, sub, onView, onPlay) {
+  const li = document.createElement('li');
+  const top = document.createElement('div');
+  top.className = 'top';
+  const n = document.createElement('div');
+  n.className = 'n';
+  n.textContent = name + (sub ? (' · ' + sub) : '');
+  top.appendChild(n);
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  const view = document.createElement('button');
+  view.className = 'tiny ghost';
+  view.textContent = 'View';
+  view.addEventListener('click', ev => { ev.stopPropagation(); onView(); });
+  const play = document.createElement('button');
+  play.className = 'tiny';
+  play.textContent = 'Play';
+  play.addEventListener('click', ev => { ev.stopPropagation(); onPlay(); });
+  acts.appendChild(view);
+  acts.appendChild(play);
+  li.appendChild(top);
+  li.appendChild(acts);
+  return li;
+}
+
+function showOpenList(name, videos) {
+  openList = { name: name, videos: videos || [] };
+  $('#yt-open').hidden = false;
+  $('#yt-open-name').textContent = name + ' · ' + videoWord(openList.videos.length);
+  renderVidList($('#yt-open-vids'), openList.videos, 'Nothing in this list.', sendVideo, null, addToPlaylist);
+}
+
+function openYtPlaylist(id, name) {
+  msg($('#lib-msg'), 'Loading ' + name + '...', '');
+  authFetch('/api/yt/playlist?id=' + encodeURIComponent(id)).then(d => {
+    if (!d || !d.ok) {
+      msg($('#lib-msg'), (d && d.error) || 'Could not open that playlist.', 'err');
+      return;
+    }
+    showOpenList(name, d.videos || []);
+    msg($('#lib-msg'), '', '');
+  }).catch(e => msg($('#lib-msg'), netText(e), 'err'));
+}
+
+function playYtPlaylist(id, name) {
+  msg($('#lib-msg'), 'Loading ' + name + '...', '');
+  authFetch('/api/yt/playlist?id=' + encodeURIComponent(id)).then(d => {
+    if (!d || !d.ok) {
+      msg($('#lib-msg'), (d && d.error) || 'Could not open that playlist.', 'err');
+      return;
+    }
+    sendYtVideos(name, d.videos || []);
+  }).catch(e => msg($('#lib-msg'), netText(e), 'err'));
+}
+
+function sendYtVideos(name, videos) {
+  if (!code) {
+    msg($('#lib-msg'), 'Pair first. Open From phone on the glasses and type the code.', 'err');
+    return;
+  }
+  if (!videos || !videos.length) {
+    msg($('#lib-msg'), 'That list is empty.', 'err');
+    return;
+  }
+  keepPost('/api/push', { code: code, name: name, videos: videos }, () => {
+    msg($('#lib-msg'), 'No internet. Retrying...', 'err');
+  }).then(d => {
+    if (!d.ok) {
+      if (expired(d.error)) {
+        dropPair(d.error);
+        return;
+      }
+      msg($('#lib-msg'), d.error || 'Could not send.', 'err');
+      return;
+    }
+    (d.videos || videos).forEach(item => rememberVideo(item, item.url));
+    buzz();
+    msg($('#lib-msg'), 'Sent "' + name + '" · ' + (d.videos || videos).length + ' videos.', 'ok');
+  }).catch(e => msg($('#lib-msg'), netText(e), 'err'));
+}
+
+function searchYouTube() {
+  const q = $('#yt-q').value.trim();
+  if (!q) {
+    msg($('#lib-msg'), 'Type something to search.', 'err');
+    return;
+  }
+  msg($('#lib-msg'), 'Searching...', '');
+  $('#btn-yt-clear').hidden = false;
+  authFetch('/api/yt/search?q=' + encodeURIComponent(q)).then(d => {
+    if (!d || !d.ok) {
+      msg($('#lib-msg'), (d && d.error) || 'Search failed.', 'err');
+      return;
+    }
+    renderVidList($('#yt-search'), d.videos || [], 'No videos for that search.', sendVideo, null, addToPlaylist);
+    msg($('#lib-msg'), (d.videos || []).length ? '' : 'No videos for that search.', (d.videos || []).length ? '' : 'err');
+    $('#btn-yt-clear').hidden = false;
+  }).catch(e => msg($('#lib-msg'), netText(e), 'err'));
+}
+
+function clearYouTubeSearch() {
+  $('#yt-q').value = '';
+  $('#yt-search').innerHTML = '';
+  $('#btn-yt-clear').hidden = true;
+  msg($('#lib-msg'), '', '');
+  $('#yt-q').focus();
+}
+
+function closeOpenList() {
+  openList = { name: '', videos: [] };
+  $('#yt-open').hidden = true;
+  $('#yt-open-vids').innerHTML = '';
+}
+
+function importSubscriptions() {
+  const subscriptions = lib.subscriptions || [];
+  if (!subscriptions.length) {
+    msg($('#lib-msg'), 'No subscriptions to add.', 'err');
+    return;
+  }
+  const list = loadChannels();
+  let added = 0;
+  subscriptions.forEach(s => {
+    if (!s.id || list.some(c => c.id === s.id)) return;
+    list.push({ name: s.name, id: s.id, url: s.url });
+    added += 1;
+  });
+  saveChannels(list);
+  renderChannels();
+  syncChannels();
+  msg($('#lib-msg'), added ? ('Added ' + added + ' subscriptions to Quick channels.') : 'Those channels are already in your list.', 'ok');
 }
 
 function rememberVideo(video, url) {
@@ -291,6 +880,9 @@ function rememberVideo(video, url) {
     channel: video.channel || '',
     thumb: video.thumb || ('https://i.ytimg.com/vi/' + video.id + '/hqdefault.jpg'),
     url: url || ('https://youtu.be/' + video.id),
+    duration: video.duration || '',
+    meta: video.meta || '',
+    live: !!video.live,
   };
   const next = loadList(RECENTS_KEY).filter(v => v.id !== item.id);
   next.unshift(item);
@@ -305,14 +897,23 @@ function renderVidList(node, items, emptyText, onSend, onRemove, onAdd) {
     p.className = 'empty';
     p.textContent = emptyText;
     node.appendChild(p);
+    node.scrollTop = 0;
     return;
   }
   items.forEach((v, i) => {
     const li = document.createElement('li');
     const img = document.createElement('img');
-    img.alt = '';
-    img.src = v.thumb || '';
-    li.appendChild(img);
+    setImg(img, v);
+    const wrap = document.createElement('div');
+    wrap.className = 'thumb-wrap';
+    wrap.appendChild(img);
+    if (v.duration) {
+      const dur = document.createElement('span');
+      dur.className = 'dur' + (v.live ? ' live' : '');
+      dur.textContent = v.duration;
+      wrap.appendChild(dur);
+    }
+    li.appendChild(wrap);
     const txt = document.createElement('div');
     txt.className = 'txt';
     const n = document.createElement('div');
@@ -323,6 +924,12 @@ function renderVidList(node, items, emptyText, onSend, onRemove, onAdd) {
     a.textContent = v.channel || v.url || '';
     txt.appendChild(n);
     txt.appendChild(a);
+    if (v.meta) {
+      const m = document.createElement('div');
+      m.className = 'm';
+      m.textContent = v.meta;
+      txt.appendChild(m);
+    }
     li.appendChild(txt);
     const send = document.createElement('button');
     send.className = 'tiny';
@@ -346,6 +953,7 @@ function renderVidList(node, items, emptyText, onSend, onRemove, onAdd) {
     li.addEventListener('click', () => onSend(v));
     node.appendChild(li);
   });
+  node.scrollTop = 0;
 }
 
 function renderRecents() {
@@ -412,38 +1020,400 @@ function savePlaylists(list) {
   catch (e) {}
 }
 
-function renderPlaylists() {
-  const node = $('#pl-list');
-  const list = playlists();
+function chUrl(ch) {
+  return (ch && ch.url) || (ch && ch.id ? ('https://www.youtube.com/channel/' + ch.id) : '');
+}
+
+function loadChannels() {
+  try {
+    const raw = localStorage.getItem(CHANNELS_KEY);
+    if (raw === null) {
+      saveChannels(DEFAULT_CHANNELS);
+      return DEFAULT_CHANNELS.slice();
+    }
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return DEFAULT_CHANNELS.slice();
+    return list.filter(c => c && c.id).slice(0, 150);
+  } catch (e) {
+    return DEFAULT_CHANNELS.slice();
+  }
+}
+
+function saveChannels(list) {
+  const next = (list || []).filter(c => c && c.id).slice(0, 150).map(c => ({
+    name: String(c.name || 'Channel').slice(0, 80),
+    id: String(c.id),
+    url: chUrl(c),
+  }));
+  try { localStorage.setItem(CHANNELS_KEY, JSON.stringify(next)); }
+  catch (e) {}
+  return next;
+}
+
+function syncChannels() {
+  if (!code) return;
+  postJSON('/api/push', { code: code, channels: loadChannels() }).catch(() => {});
+}
+
+function renderChannels() {
+  const raw = loadChannels();
+  const q = $('#ch-q') ? $('#ch-q').value : '';
+  const indexed = raw.map((c, i) => Object.assign({}, c, { _i: i }));
+  let list = indexed.filter(c => nameMatch(c.name, q));
+  if (libUi.chAz) list = byName(list);
+  const node = $('#ch-list');
   node.innerHTML = '';
-  if (!list.length) {
-    const p = document.createElement('div');
-    p.className = 'empty';
-    p.textContent = 'No playlists yet.';
-    node.appendChild(p);
+  if (!raw.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'No channels yet. Paste a channel link or @name below.';
+    node.appendChild(empty);
+    node.scrollTop = 0;
     return;
   }
-  list.forEach((p, i) => {
+  if (!list.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'No channel matches that.';
+    node.appendChild(empty);
+    node.scrollTop = 0;
+    return;
+  }
+  const canMove = !libUi.chAz && !String(q || '').trim();
+  list.forEach(ch => {
+    const i = ch._i;
     const li = document.createElement('li');
     const top = document.createElement('div');
     top.className = 'top';
     const n = document.createElement('div');
     n.className = 'n';
-    n.textContent = p.name + ' · ' + ((p.videos || []).length) + ' videos';
-    const open = document.createElement('button');
-    open.className = 'tiny ghost';
-    open.textContent = 'Edit';
-    open.addEventListener('click', ev => { ev.stopPropagation(); openPlaylist(i); });
+    n.textContent = ch.name;
+    top.appendChild(n);
+    const acts = document.createElement('div');
+    acts.className = 'acts';
+    function addBtn(label, ghost, fn) {
+      const btn = document.createElement('button');
+      btn.className = ghost ? 'tiny ghost' : 'tiny';
+      btn.textContent = label;
+      btn.addEventListener('click', ev => { ev.stopPropagation(); fn(); });
+      acts.appendChild(btn);
+      return btn;
+    }
+    addBtn('Play', false, () => sendChannelLatest(ch));
+    addBtn('Play 6', true, () => sendChannelLatest(ch, 6));
+    addBtn('Open', true, () => browseChannel(ch));
+    if (canMove) {
+      const up = addBtn('Up', true, () => moveChannel(i, -1));
+      up.disabled = i === 0;
+      const down = addBtn('Down', true, () => moveChannel(i, 1));
+      down.disabled = i === raw.length - 1;
+    }
+    addBtn('Delete', true, () => {
+      const next = loadChannels();
+      next.splice(i, 1);
+      saveChannels(next);
+      renderChannels();
+      syncChannels();
+      msg($('#ch-msg'), 'Removed ' + ch.name + '.', 'ok');
+    });
+    li.appendChild(top);
+    li.appendChild(acts);
+    node.appendChild(li);
+  });
+  node.scrollTop = 0;
+}
+
+function moveChannel(i, dir) {
+  const list = loadChannels();
+  const j = i + dir;
+  if (j < 0 || j >= list.length) return;
+  const tmp = list[i];
+  list[i] = list[j];
+  list[j] = tmp;
+  saveChannels(list);
+  renderChannels();
+  syncChannels();
+}
+
+function sendChannelLatest(ch, count) {
+  const n = count || 1;
+  if (!code) {
+    msg($('#ch-msg'), 'Pair first.', 'err');
+    return;
+  }
+  if (n === 1) {
+    sendVideo({ url: chUrl(ch), title: ch.name });
+    return;
+  }
+  if (busy) return;
+  busy = true;
+  msg($('#ch-msg'), 'Loading ' + ch.name + '...', '');
+  fetch('/api/feed?channel=' + encodeURIComponent(ch.id) + '&limit=' + n)
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok || !(d.videos && d.videos.length)) {
+        busy = false;
+        msg($('#ch-msg'), (d && d.error) || 'No videos on that channel.', 'err');
+        return;
+      }
+      return keepPost('/api/push', { code: code, name: ch.name, videos: d.videos }, () => {
+        msg($('#ch-msg'), 'No internet. Retrying...', 'err');
+      }).then(out => {
+        busy = false;
+        if (!out.ok) {
+          if (expired(out.error)) {
+            dropPair(out.error);
+            return;
+          }
+          msg($('#ch-msg'), out.error || 'Could not send.', 'err');
+          return;
+        }
+        buzz();
+        (out.videos || d.videos).forEach(item => rememberVideo(item, item.url));
+        msg($('#ch-msg'), 'Sent ' + (out.videos || d.videos).length + ' from ' + ch.name + '.', 'ok');
+      });
+    })
+    .catch(e => {
+      busy = false;
+      msg($('#ch-msg'), netText(e), 'err');
+    });
+}
+
+function browseChannel(ch) {
+  if (!code) {
+    msg($('#ch-msg'), 'Pair first.', 'err');
+    return;
+  }
+  keepPost('/api/push', { code: code, openChannel: { id: ch.id, name: ch.name } }, () => {
+    msg($('#ch-msg'), 'No internet. Retrying...', 'err');
+  }).then(d => {
+    if (!d.ok) {
+      if (expired(d.error)) {
+        dropPair(d.error);
+        return;
+      }
+      msg($('#ch-msg'), d.error || 'Could not open that channel.', 'err');
+      return;
+    }
+    buzz();
+    msg($('#ch-msg'), 'Opened ' + ch.name + ' on the glasses.', 'ok');
+  }).catch(e => msg($('#ch-msg'), netText(e), 'err'));
+}
+
+function addChannel() {
+  const raw = $('#ch-url').value.trim();
+  if (!raw) {
+    msg($('#ch-msg'), 'Paste a channel link or @name.', 'err');
+    return;
+  }
+  msg($('#ch-msg'), 'Looking up that channel...', '');
+  fetch('/api/feed?url=' + encodeURIComponent(raw))
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok || !d.id) {
+        msg($('#ch-msg'), (d && d.error) || 'Could not find that channel.', 'err');
+        return;
+      }
+      const list = loadChannels();
+      if (list.some(c => c.id === d.id)) {
+        msg($('#ch-msg'), d.name + ' is already in your list.', 'ok');
+        return;
+      }
+      list.push({ name: d.name, id: d.id, url: d.url });
+      saveChannels(list);
+      $('#ch-url').value = '';
+      $('#btn-ch-clear').hidden = true;
+      renderChannels();
+      syncChannels();
+      msg($('#ch-msg'), 'Added ' + d.name + '. It is on the glasses too.', 'ok');
+    })
+    .catch(e => msg($('#ch-msg'), netText(e), 'err'));
+}
+
+function videoIdFrom(raw) {
+  const s = String(raw || '');
+  const m = s.match(/[?&]v=([a-zA-Z0-9_-]{11})/) ||
+    s.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/) ||
+    s.match(/\/(?:shorts|embed|live)\/([a-zA-Z0-9_-]{11})/) ||
+    s.match(/ytimg\.com\/vi\/([a-zA-Z0-9_-]{11})\//);
+  if (m) return m[1];
+  if (/^[a-zA-Z0-9_-]{11}$/.test(s) && s.indexOf('http') !== 0) return s;
+  return '';
+}
+
+function thumbUrl(id) {
+  return id ? ('https://i.ytimg.com/vi/' + id + '/hqdefault.jpg') : '';
+}
+
+function pic(v) {
+  if (!v) return '/icon-192.png?v=2';
+  const id = videoIdFrom(v.url || v.id || v.title || v.thumb || '');
+  if (id) return 'https://i.ytimg.com/vi/' + id + '/hqdefault.jpg';
+  if (v.url) return '/api/thumb?url=' + encodeURIComponent(v.url);
+  if (v.thumb && String(v.thumb).indexOf('/api/thumb') === 0) return v.thumb;
+  if (v.thumb && /^https?:/i.test(v.thumb)) return '/api/thumb?url=' + encodeURIComponent(v.thumb);
+  return '/icon-192.png?v=2';
+}
+
+function setImg(img, v) {
+  const id = videoIdFrom(v && (v.url || v.id || v.title || v.thumb) || '');
+  img.alt = '';
+  img.dataset.id = id;
+  img.dataset.url = (v && v.url) || '';
+  img.dataset.fb = '0';
+  img.src = pic(v);
+  img.onerror = function () {
+    const n = Number(img.dataset.fb || 0);
+    if (n === 0) {
+      img.dataset.fb = '1';
+      if (img.dataset.id) {
+        img.src = '/api/thumb?v=' + encodeURIComponent(img.dataset.id);
+        return;
+      }
+      if (img.dataset.url) {
+        img.src = '/api/thumb?url=' + encodeURIComponent(img.dataset.url);
+        return;
+      }
+    }
+    img.dataset.fb = '2';
+    img.src = '/icon-192.png?v=2';
+  };
+}
+
+function looksBare(v) {
+  if (!v) return true;
+  if (!v.thumb) return true;
+  const t = String(v.title || '');
+  return /^https?:/i.test(t) || t === v.url || t === 'Looking up...';
+}
+
+function fillVideo(item, done) {
+  const id = (item.id && /^[a-zA-Z0-9_-]{11}$/.test(item.id))
+    ? item.id
+    : videoIdFrom(item.url || item.id || item.title);
+  if (id) {
+    item.id = id;
+    if (!item.thumb) item.thumb = thumbUrl(id);
+    if (!item.url || item.url === item.id) item.url = 'https://youtu.be/' + id;
+  }
+  const raw = item.url || item.id || '';
+  if (!raw) {
+    if (done) done(item);
+    return;
+  }
+  fetch('/api/oembed?url=' + encodeURIComponent(raw))
+    .then(r => r.json())
+    .then(d => {
+      if (d && d.ok && d.id) {
+        item.id = d.id;
+        item.title = d.title || item.title;
+        item.channel = d.channel || item.channel || '';
+        item.thumb = d.thumb || thumbUrl(d.id);
+        item.url = 'https://youtu.be/' + d.id;
+      }
+      if (done) done(item);
+    })
+    .catch(() => { if (done) done(item); });
+}
+
+function hydratePlaylists() {
+  const list = playlists();
+  let changed = false;
+  list.forEach((p, pi) => {
+    (p.videos || []).forEach((v, vi) => {
+      if (!looksBare(v)) return;
+      const id = videoIdFrom(v.url || v.id || v.title);
+      if (id && !v.thumb) {
+        v.id = id;
+        v.thumb = thumbUrl(id);
+        if (!v.url) v.url = 'https://youtu.be/' + id;
+        changed = true;
+      }
+      fillVideo(v, filled => {
+        const next = playlists();
+        if (!next[pi] || !next[pi].videos || !next[pi].videos[vi]) return;
+        next[pi].videos[vi] = filled;
+        savePlaylists(next);
+        renderPlaylists();
+        if (editPl === pi) renderPlVids();
+      });
+    });
+  });
+  if (changed) savePlaylists(list);
+}
+
+function renderPlaylists() {
+  const node = $('#pl-list');
+  const all = playlists();
+  const q = $('#home-pl-q') ? $('#home-pl-q').value : '';
+  const list = all.map((p, i) => Object.assign({}, p, { _i: i })).filter(p => nameMatch(p.name, q));
+  node.innerHTML = '';
+  if (!all.length) {
+    const p = document.createElement('div');
+    p.className = 'empty';
+    p.textContent = 'No playlists yet.';
+    node.appendChild(p);
+    node.scrollTop = 0;
+    return;
+  }
+  if (!list.length) {
+    const p = document.createElement('div');
+    p.className = 'empty';
+    p.textContent = 'No playlist matches that.';
+    node.appendChild(p);
+    node.scrollTop = 0;
+    return;
+  }
+  list.forEach(p => {
+    const i = p._i;
+    const li = document.createElement('li');
+    const top = document.createElement('div');
+    top.className = 'top';
+    const cover = document.createElement('img');
+    cover.className = 'cover';
+    const first = (p.videos || []).find(v => v);
+    setImg(cover, first || null);
+    const n = document.createElement('div');
+    n.className = 'n';
+    n.textContent = p.name + ' · ' + videoWord((p.videos || []).length);
+    top.appendChild(cover);
+    top.appendChild(n);
+    const acts = document.createElement('div');
+    acts.className = 'acts';
+    const view = document.createElement('button');
+    view.className = 'tiny ghost';
+    view.textContent = 'View';
+    view.addEventListener('click', ev => { ev.stopPropagation(); openPlaylist(i); });
     const send = document.createElement('button');
     send.className = 'tiny';
     send.textContent = 'Play';
     send.addEventListener('click', ev => { ev.stopPropagation(); sendPlaylist(i); });
-    top.appendChild(n);
-    top.appendChild(open);
-    top.appendChild(send);
+    const del = document.createElement('button');
+    del.className = 'tiny ghost';
+    del.textContent = 'Delete';
+    del.addEventListener('click', ev => { ev.stopPropagation(); deletePlaylist(i); });
+    acts.appendChild(view);
+    acts.appendChild(send);
+    acts.appendChild(del);
     li.appendChild(top);
+    li.appendChild(acts);
     node.appendChild(li);
   });
+  node.scrollTop = 0;
+}
+
+function deletePlaylist(i) {
+  const list = playlists();
+  list.splice(i, 1);
+  savePlaylists(list);
+  if (editPl === i) {
+    editPl = -1;
+    $('#pl-editor').hidden = true;
+  } else if (editPl > i) {
+    editPl -= 1;
+  }
+  renderPlaylists();
+  msg($('#pl-list-msg'), 'Deleted.', 'ok');
 }
 
 function openPlaylist(i) {
@@ -453,6 +1423,17 @@ function openPlaylist(i) {
   $('#pl-editor').hidden = false;
   $('#pl-edit-name').textContent = p.name;
   renderPlVids();
+  (p.videos || []).forEach((v, vi) => {
+    if (!looksBare(v)) return;
+    fillVideo(v, filled => {
+      const next = playlists();
+      if (!next[i] || !next[i].videos || !next[i].videos[vi]) return;
+      next[i].videos[vi] = filled;
+      savePlaylists(next);
+      if (editPl === i) renderPlVids();
+      renderPlaylists();
+    });
+  });
 }
 
 function renderPlVids() {
@@ -471,15 +1452,18 @@ function renderPlVids() {
   items.forEach((v, i) => {
     const li = document.createElement('li');
     const img = document.createElement('img');
-    img.alt = '';
-    img.src = v.thumb || '';
+    setImg(img, v);
     li.appendChild(img);
     const txt = document.createElement('div');
     txt.className = 'txt';
     const n = document.createElement('div');
     n.className = 'n';
     n.textContent = v.title || 'Video';
+    const a = document.createElement('div');
+    a.className = 'a';
+    a.textContent = v.channel || '';
     txt.appendChild(n);
+    if (v.channel) txt.appendChild(a);
     li.appendChild(txt);
     const up = document.createElement('button');
     up.className = 'tiny ghost';
@@ -614,13 +1598,14 @@ function sendVideo(item) {
     const v = d.video || {};
     const many = d.videos && d.videos.length > 1;
     $('#preview').hidden = false;
-    $('#prev-img').src = v.thumb || '';
+    setImg($('#prev-img'), v);
     $('#prev-title').textContent = v.title || 'Sent';
     $('#prev-ch').textContent = many
-      ? ((d.name || 'Playlist') + ' · ' + d.videos.length + ' videos')
+      ? ((d.name || 'Playlist') + ' · ' + videoWord(d.videos.length))
       : (v.channel || '');
     rememberVideo(v, url);
     (d.videos || [v]).forEach(item => rememberVideo(item, item.url));
+    syncClearBtn($('#url'), $('#btn-url-clear'));
     buzz();
     msg($('#send-msg'), many
       ? 'Sent ' + d.videos.length + ' videos. They play one after another on the glasses.'
@@ -653,27 +1638,84 @@ function sendPlaylist(i) {
       msg($('#pl-msg'), d.error || 'Could not send.', 'err');
       return;
     }
+    if (d.videos && d.videos.length) {
+      const list = playlists();
+      if (list[i]) {
+        list[i].videos = d.videos;
+        savePlaylists(list);
+        renderPlaylists();
+        if (editPl === i) renderPlVids();
+      }
+    }
     buzz();
     msg($('#pl-msg'), 'Playing "' + p.name + '" on the glasses. ' + (d.videos || p.videos).length + ' videos.', 'ok');
+    msg($('#pl-list-msg'), 'Playing "' + p.name + '" on the glasses.', 'ok');
   }).catch(e => {
     busy = false;
     msg($('#pl-msg'), netText(e), 'err');
   });
 }
 
-CHANNELS.forEach(ch => {
-  const b = document.createElement('button');
-  b.className = 'ghost';
-  b.textContent = ch.name;
-  b.addEventListener('click', () => sendVideo({ url: ch.url, title: ch.name }));
-  $('#chips').appendChild(b);
+$('#btn-ch-add').addEventListener('click', addChannel);
+$('#ch-url').addEventListener('keydown', e => { if (e.key === 'Enter') addChannel(); });
+renderChannels();
+$('#btn-google').addEventListener('click', startGoogle);
+$('#btn-logout').addEventListener('click', () => {
+  setSession('');
+  showSignedOut();
+  msg($('#acct-msg'), 'Signed out.', 'ok');
 });
+$('#btn-yt-search').addEventListener('click', searchYouTube);
+$('#yt-q').addEventListener('keydown', e => { if (e.key === 'Enter') searchYouTube(); });
+$('#yt-q').addEventListener('input', () => {
+  $('#btn-yt-clear').hidden = !($('#yt-q').value.trim() || $('#yt-search').children.length);
+});
+$('#btn-yt-clear').addEventListener('click', clearYouTubeSearch);
+$('#btn-yt-open-play').addEventListener('click', () => sendYtVideos(openList.name, openList.videos));
+$('#btn-yt-open-close').addEventListener('click', closeOpenList);
+$('#btn-subs-import').addEventListener('click', importSubscriptions);
+$('#pls-q').addEventListener('input', renderYtPlaylists);
+$('#subs-q').addEventListener('input', renderYtSubs);
+$('#btn-pls-az').addEventListener('click', () => {
+  libUi.plsAz = !libUi.plsAz;
+  $('#btn-pls-az').classList.toggle('on', libUi.plsAz);
+  renderYtPlaylists();
+});
+$('#btn-subs-az').addEventListener('click', () => {
+  libUi.subsAz = !libUi.subsAz;
+  $('#btn-subs-az').classList.toggle('on', libUi.subsAz);
+  renderYtSubs();
+});
+$('#ch-q').addEventListener('input', renderChannels);
+$('#btn-ch-az').addEventListener('click', () => {
+  libUi.chAz = !libUi.chAz;
+  $('#btn-ch-az').classList.toggle('on', libUi.chAz);
+  renderChannels();
+});
+$('#ch-url').addEventListener('input', () => syncClearBtn($('#ch-url'), $('#btn-ch-clear')));
+$('#btn-ch-clear').addEventListener('click', () => {
+  $('#ch-url').value = '';
+  $('#btn-ch-clear').hidden = true;
+  $('#ch-url').focus();
+});
+$('#home-pl-q').addEventListener('input', renderPlaylists);
 
 $('#btn-connect').addEventListener('click', () => connect($('#code').value));
 $('#code').addEventListener('keydown', e => { if (e.key === 'Enter') connect($('#code').value); });
+$('#code').addEventListener('input', () => {
+  if (normCode($('#code').value).length === 6) connect($('#code').value);
+});
 $('#btn-unpair').addEventListener('click', () => dropPair(''));
 $('#btn-send').addEventListener('click', () => sendVideo());
 $('#url').addEventListener('keydown', e => { if (e.key === 'Enter') sendVideo(); });
+$('#url').addEventListener('input', () => syncClearBtn($('#url'), $('#btn-url-clear')));
+$('#btn-url-clear').addEventListener('click', () => {
+  $('#url').value = '';
+  $('#preview').hidden = true;
+  $('#btn-url-clear').hidden = true;
+  msg($('#send-msg'), '', '');
+  $('#url').focus();
+});
 $('#btn-paste').addEventListener('click', () => {
   if (!navigator.clipboard || !navigator.clipboard.readText) {
     msg($('#send-msg'), 'Paste into the box, then tap Send.', 'err');
@@ -681,6 +1723,7 @@ $('#btn-paste').addEventListener('click', () => {
   }
   navigator.clipboard.readText().then(t => {
     $('#url').value = String(t || '').trim();
+    syncClearBtn($('#url'), $('#btn-url-clear'));
     $('#url').focus();
   }).catch(() => msg($('#send-msg'), 'Allow paste, or drop the link in the box.', 'err'));
 });
@@ -715,8 +1758,7 @@ $('#btn-play-recents').addEventListener('click', () => {
 $('#btn-pl-new').addEventListener('click', () => {
   const name = $('#pl-name').value.trim();
   if (!name) {
-    msg($('#pl-msg'), 'Name the playlist first.', 'err');
-    $('#pl-editor').hidden = false;
+    msg($('#pl-list-msg'), 'Name the playlist first.', 'err');
     return;
   }
   const list = playlists();
@@ -739,12 +1781,31 @@ $('#btn-pl-add').addEventListener('click', () => {
   }
   const list = playlists();
   list[editPl].videos = list[editPl].videos || [];
-  list[editPl].videos.push({ title: url, url: url, channel: '', thumb: '', id: url });
+  const id = videoIdFrom(url);
+  const item = {
+    title: 'Looking up...',
+    url: url,
+    channel: '',
+    thumb: thumbUrl(id),
+    id: id || url,
+  };
+  list[editPl].videos.push(item);
   savePlaylists(list);
   $('#pl-url').value = '';
   renderPlVids();
   renderPlaylists();
-  msg($('#pl-msg'), 'Added. Titles fill in when you play the list.', 'ok');
+  msg($('#pl-msg'), 'Looking up that video...', 'ok');
+  const slot = list[editPl].videos.length - 1;
+  const which = editPl;
+  fillVideo(item, filled => {
+    const next = playlists();
+    if (!next[which] || !next[which].videos || !next[which].videos[slot]) return;
+    next[which].videos[slot] = filled;
+    savePlaylists(next);
+    if (editPl === which) renderPlVids();
+    renderPlaylists();
+    msg($('#pl-msg'), 'Added "' + (filled.title || 'video') + '".', 'ok');
+  });
 });
 $('#btn-pl-send').addEventListener('click', () => {
   if (editPl < 0) return;
@@ -754,19 +1815,19 @@ $('#btn-pl-close').addEventListener('click', () => {
   $('#pl-editor').hidden = true;
   editPl = -1;
 });
-$('#btn-pl-del').addEventListener('click', () => {
-  if (editPl < 0) return;
-  const list = playlists();
-  list.splice(editPl, 1);
-  savePlaylists(list);
-  editPl = -1;
-  $('#pl-editor').hidden = true;
-  renderPlaylists();
-  msg($('#pl-msg'), 'Deleted.', 'ok');
-});
 $('#pl-url').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btn-pl-add').click(); });
 $('#pl-name').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btn-pl-new').click(); });
 
+$('#btn-saved-paste').addEventListener('click', () => {
+  if (!navigator.clipboard || !navigator.clipboard.readText) {
+    msg($('#saved-msg'), 'Paste into the box.', 'err');
+    return;
+  }
+  navigator.clipboard.readText().then(t => {
+    $('#surl').value = String(t || '').trim();
+    $('#surl').focus();
+  }).catch(() => msg($('#saved-msg'), 'Allow paste, or drop the link in the box.', 'err'));
+});
 $('#btn-add').addEventListener('click', () => {
   const title = $('#sname').value.trim();
   const url = $('#surl').value.trim();
@@ -787,9 +1848,23 @@ $('#btn-add').addEventListener('click', () => {
   try {
     const q = new URLSearchParams(location.search);
     const incoming = q.get('url') || q.get('v') || '';
-    if (incoming) $('#url').value = incoming;
+    if (incoming) {
+      $('#url').value = incoming;
+      syncClearBtn($('#url'), $('#btn-url-clear'));
+    }
+    const sess = q.get('s');
+    if (sess) {
+      setSession(sess);
+      history.replaceState({}, '', '/phone');
+    }
+    const autherr = q.get('autherr');
+    if (autherr) {
+      msg($('#acct-msg'), autherr, 'err');
+      history.replaceState({}, '', '/phone');
+    }
   } catch (e) {}
 })();
+refreshAccount();
 
 try {
   const saved = localStorage.getItem(CODE_KEY);

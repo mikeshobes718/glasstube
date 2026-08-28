@@ -1,9 +1,11 @@
+import AuthenticationServices
 import SwiftUI
 import WebKit
 
 struct WebScreen: UIViewRepresentable {
     let url: URL
     let reloadToken: Int
+    var authBlob: String = ""
     var onReady: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
@@ -16,6 +18,7 @@ struct WebScreen: UIViewRepresentable {
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         config.websiteDataStore = .default()
+        config.userContentController.add(context.coordinator, name: "glasstube")
 
         let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = context.coordinator
@@ -40,6 +43,10 @@ struct WebScreen: UIViewRepresentable {
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
         context.coordinator.onReady = onReady
+        if !authBlob.isEmpty && context.coordinator.lastAuthBlob != authBlob {
+            context.coordinator.lastAuthBlob = authBlob
+            context.coordinator.injectSession(authBlob)
+        }
         if context.coordinator.loadedURL != url {
             context.coordinator.loadedURL = url
             context.coordinator.fitHud = !url.path.contains("phone")
@@ -54,13 +61,19 @@ struct WebScreen: UIViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        uiView.configuration.userContentController.removeScriptMessageHandler(forName: "glasstube")
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, ASWebAuthenticationPresentationContextProviding {
         weak var webView: WKWebView?
         var lastReloadToken = 0
+        var lastAuthBlob = ""
         var fitHud = false
         var loadedURL: URL?
         var onReady: (() -> Void)?
         var failCount = 0
+        var authSession: ASWebAuthenticationSession?
 
         private let fitScript = """
         (function () {
@@ -98,6 +111,53 @@ struct WebScreen: UIViewRepresentable {
         private func reloadApp() {
             guard let view = webView, let dest = loadedURL else { return }
             view.load(URLRequest(url: dest, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
+        }
+
+        func injectSession(_ blob: String) {
+            let escaped = blob
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "'", with: "\\'")
+            let js = "try{localStorage.setItem('glasstube.phone.google','\(escaped)');}catch(e){}location.replace('/phone');"
+            webView?.evaluateJavaScript(js, completionHandler: nil)
+        }
+
+        func startGoogleAuth() {
+            guard let start = URL(string: "https://glasstube.vercel.app/api/auth/google?n=ios") else { return }
+            let session = ASWebAuthenticationSession(url: start, callbackURLScheme: "glasstube") { [weak self] callbackURL, error in
+                guard let self else { return }
+                if error != nil { return }
+                guard let callbackURL else { return }
+                let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems
+                if let err = items?.first(where: { $0.name == "err" })?.value, !err.isEmpty {
+                    let safe = err.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "Google%20login%20failed"
+                    DispatchQueue.main.async {
+                        if let dest = URL(string: "https://glasstube.vercel.app/phone?autherr=\(safe)") {
+                            self.webView?.load(URLRequest(url: dest))
+                        }
+                    }
+                    return
+                }
+                guard let blob = items?.first(where: { $0.name == "s" })?.value, !blob.isEmpty else { return }
+                DispatchQueue.main.async { self.injectSession(blob) }
+            }
+            session.presentationContextProvider = self
+            session.prefersEphemeralWebBrowserSession = false
+            authSession = session
+            session.start()
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == "glasstube" else { return }
+            let type = (message.body as? [String: Any])?["type"] as? String
+            if type == "google-auth" {
+                DispatchQueue.main.async { self.startGoogleAuth() }
+            }
+        }
+
+        func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+            if let window = webView?.window { return window }
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            return scenes.flatMap(\.windows).first(where: \.isKeyWindow) ?? ASPresentationAnchor()
         }
 
         private func showLoadError() {
@@ -138,6 +198,11 @@ struct WebScreen: UIViewRepresentable {
             }
             if dest.scheme == "about" {
                 decisionHandler(.allow)
+                return
+            }
+            if dest.path.hasPrefix("/api/auth/google") {
+                decisionHandler(.cancel)
+                startGoogleAuth()
                 return
             }
             if dest.scheme != "http" && dest.scheme != "https" {

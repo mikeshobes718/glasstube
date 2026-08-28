@@ -8,7 +8,7 @@ const DPAD = {
 const BACK_KEYS = ['Escape', 'Backspace', 'BrowserBack', 'GoBack'];
 const isBackKey = k => BACK_KEYS.indexOf(k) !== -1;
 
-const CHANNELS = [
+const DEFAULT_CHANNELS = [
   { name: 'TED Talks', id: 'UCAuUUnT6oDeKwE6v1NGQxug' },
   { name: 'NASA', id: 'UCLA_DiR1FfKNvjuUpBHmylQ' },
   { name: 'Veritasium', id: 'UCHnyfMqiRRG1u-2MsSQLbXA' },
@@ -18,6 +18,7 @@ const CHANNELS = [
 ];
 
 const MAX_LIST = 6;
+const CHANNEL_PAGE = 5;
 const MAX_RECENTS = 12;
 const PAIR_POLL_MS = 2000;
 const RETRY_MS = 3000;
@@ -25,6 +26,7 @@ const RECENTS_KEY = 'glasstube.recents';
 const PAIR_KEY = 'glasstube.pair';
 const PLAYLISTS_KEY = 'glasstube.playlists';
 const PROGRESS_KEY = 'glasstube.progress';
+const CHANNELS_KEY = 'glasstube.channels';
 const sound = (typeof GlassSound !== 'undefined') ? GlassSound : null;
 const prefs = (typeof GlassPrefs !== 'undefined') ? GlassPrefs : null;
 
@@ -52,8 +54,11 @@ let feedWait = '';
 let nowPlaying = null;
 let netOffline = false;
 let loadRetry = 0;
+let needGesture = false;
 let sleepUntil = 0;
 let sleepWatch = 0;
+let channelPage = 0;
+let listKind = '';
 
 function report(text) {
   if (window.glasstubeReport) window.glasstubeReport(text);
@@ -64,6 +69,28 @@ function fmtTime(s) {
   const m = Math.floor(s / 60);
   const r = s % 60;
   return m + ':' + String(r).padStart(2, '0');
+}
+
+function channelsLoad() {
+  try {
+    const raw = localStorage.getItem(CHANNELS_KEY);
+    if (raw === null) return DEFAULT_CHANNELS.slice();
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return DEFAULT_CHANNELS.slice();
+    return list.filter(c => c && c.id && c.name).slice(0, 24);
+  } catch (e) {
+    return DEFAULT_CHANNELS.slice();
+  }
+}
+
+function channelsSave(list) {
+  const next = (list || []).filter(c => c && c.id).slice(0, 24).map(c => ({
+    name: String(c.name || 'Channel').slice(0, 80),
+    id: String(c.id),
+  }));
+  try { localStorage.setItem(CHANNELS_KEY, JSON.stringify(next)); }
+  catch (e) { /* private mode */ }
+  return next;
 }
 
 function recentsLoad() {
@@ -354,7 +381,8 @@ function queueTitle() {
     : 'Videos';
 }
 
-function renderList(title, items, emptyText, onBack, backLabel) {
+function renderList(title, items, emptyText, onBack, backLabel, kind) {
+  listKind = kind || '';
   listBack = onBack || (() => show('home'));
   $('#list-title').textContent = title;
   const box = $('#list-items');
@@ -424,6 +452,31 @@ function showVideoList(title, videos, onBack) {
   renderList(title, items, 'No videos in this list.', onBack || (() => show('home')));
 }
 
+function setLoading(on, title, text) {
+  const el = $('#load-gate');
+  const msg = $('#load-gate-msg');
+  const name = $('#load-gate-title');
+  if (!el) return;
+  el.classList.toggle('hidden', !on);
+  if (on) setPlayGate(false);
+  if (name) name.textContent = title || (nowPlaying && nowPlaying.title) || 'YouTube video';
+  if (msg) msg.textContent = netOffline ? 'No internet. Retrying...' : (text || 'Loading...');
+}
+
+function setPlayGate(on, title, text) {
+  const gate = $('#play-gate');
+  const name = $('#play-gate-title');
+  const msg = $('#play-gate-msg');
+  if (!gate) return;
+  gate.classList.toggle('hidden', !on);
+  if (on) {
+    const load = $('#load-gate');
+    if (load) load.classList.add('hidden');
+  }
+  if (name) name.textContent = title || (nowPlaying && nowPlaying.title) || 'YouTube video';
+  if (msg && text) msg.textContent = text;
+}
+
 function openPlayer(index, autoplay, startAt) {
   if (index < 0 || index >= queue.length) return;
   queueIndex = index;
@@ -435,12 +488,9 @@ function openPlayer(index, autoplay, startAt) {
   $('#player-error').classList.add('hidden');
   $('#player-time').textContent = '0:00 / 0:00';
   $('#player-fill').style.width = '0%';
-  const gate = $('#play-gate');
-  const gateTitle = $('#play-gate-title');
-  if (gate && gateTitle) {
-    gateTitle.textContent = video.title || 'YouTube video';
-    gate.classList.add('hidden');
-  }
+  needGesture = false;
+  setPlayGate(false);
+  setLoading(true, video.title, 'Loading...');
   show('player');
   if (typeof Player === 'undefined') {
     $('#player-error').textContent = 'Player script missing.';
@@ -473,14 +523,12 @@ function openPlayer(index, autoplay, startAt) {
     if (autoplay) {
       setTimeout(function () {
         if (current !== 'player') return;
+        if (nowPlaying && nowPlaying.id !== video.id) return;
         const snap = Player.snapshot();
-        if (snap.playing || snap.error) return;
-        if (gate && gateTitle) {
-          gateTitle.textContent = video.title || 'YouTube video';
-          const msg = $('#play-gate-msg');
-          if (msg) msg.textContent = 'Enter to play';
-          gate.classList.remove('hidden');
-        }
+        if (snap.playing || snap.paused || snap.error) return;
+        needGesture = true;
+        setPlayGate(true, video.title, 'Enter to play');
+        updateChrome();
       }, 2800);
     }
   });
@@ -520,6 +568,17 @@ function playPrev() {
 }
 
 function applyPush(dest) {
+  if (!dest) return;
+  if (dest.kind === 'channels') {
+    channelsSave(dest.channels || []);
+    if (listKind === 'channels' && current === 'list') openChannels(channelPage);
+    if (current !== 'player') setStatus('Channels updated from your phone.');
+    return;
+  }
+  if (dest.kind === 'channel' && dest.id) {
+    loadChannel({ id: dest.id, name: dest.name || 'Channel' });
+    return;
+  }
   const list = (dest.videos && dest.videos.length) ? dest.videos : [dest];
   const name = dest.playlist || 'From phone';
   const ordered = maybeShuffle(list);
@@ -542,22 +601,43 @@ function updateChrome() {
   const nextBit = (queue.length > 1 && nxt && nxt.title)
     ? (' · Next ' + String(nxt.title).slice(0, 28))
     : '';
+  let phase = 'Loading';
+  if (snap.error) phase = 'Error';
+  else if (snap.playing) phase = 'Enter pause';
+  else if (snap.paused) phase = 'Paused · Enter play';
+  else if (snap.ended) phase = 'Ended · Enter play';
+  else if (needGesture) phase = 'Enter to play';
+  else if (snap.buffering) phase = 'Buffering';
   $('#player-hint').textContent = pos +
-    (snap.playing ? 'Enter pause' : 'Enter play') +
-    ' · Down next · Left back' + nextBit;
+    phase +
+    (queue.length > 1 ? ' · Up last · Down next' : ' · Up -10s') +
+    ' · Left back · Right +10s' + nextBit;
   if ($('#player-next')) {
     $('#player-next').textContent = nxt && nxt.title && queue.length > 1
       ? ('Next: ' + nxt.title)
       : '';
   }
-  if (snap.playing) {
-    const gate = $('#play-gate');
-    if (gate) gate.classList.add('hidden');
-    progressSave();
-  }
+  const title = nowPlaying && nowPlaying.title;
   if (snap.error) {
+    needGesture = false;
+    setLoading(false);
+    setPlayGate(false);
     $('#player-error').textContent = snap.error;
     $('#player-error').classList.remove('hidden');
+  } else if (snap.playing) {
+    needGesture = false;
+    setLoading(false);
+    setPlayGate(false);
+    progressSave();
+  } else if (snap.paused || snap.ended) {
+    needGesture = false;
+    setPlayGate(true, title, snap.ended ? 'Ended · Enter to play' : 'Paused · Enter to play');
+  } else if (needGesture) {
+    setPlayGate(true, title, 'Enter to play');
+  } else if (snap.buffering && snap.time > 0.4) {
+    setLoading(true, title, 'Buffering...');
+  } else {
+    setLoading(true, title, 'Loading...');
   }
 }
 
@@ -584,12 +664,40 @@ function openPlaylists() {
   })), 'Send a playlist from your iPhone. It stays here after that.', () => show('home'));
 }
 
-function openChannels() {
-  renderList('Channels', CHANNELS.map(ch => ({
+function openChannels(page) {
+  channelPage = Math.max(0, Number(page) || 0);
+  const all = channelsLoad();
+  const start = channelPage * CHANNEL_PAGE;
+  const slice = all.slice(start, start + CHANNEL_PAGE);
+  const items = slice.map(ch => ({
     label: ch.name,
     sub: 'Latest videos',
     onPick: () => loadChannel(ch),
-  })), 'No channels.', () => show('home'));
+  }));
+  if (start + CHANNEL_PAGE < all.length) {
+    items.push({
+      label: 'More channels',
+      sub: (all.length - start - CHANNEL_PAGE) + ' more',
+      onPick: () => openChannels(channelPage + 1),
+    });
+  } else if (channelPage > 0) {
+    items.push({
+      label: 'First page',
+      sub: all.length + ' channels',
+      onPick: () => openChannels(0),
+    });
+  }
+  renderList(
+    'Channels',
+    items,
+    'Add channels on your iPhone. They show up here.',
+    () => {
+      if (channelPage > 0) openChannels(channelPage - 1);
+      else show('home');
+    },
+    channelPage > 0 ? 'Previous' : 'Back',
+    'channels'
+  );
 }
 
 function loadChannel(ch) {
@@ -619,7 +727,7 @@ function loadChannel(ch) {
           channel: v.channel || ch.name,
           thumb: v.thumb,
         }));
-        showVideoList(ch.name, videos, openChannels);
+        showVideoList(ch.name, videos, () => openChannels(channelPage));
       })
       .catch(e => {
         feedHealth = String((e && e.message) || e);
@@ -729,14 +837,17 @@ function pollPair() {
           ? 'Phone connected. Send a video from the iPhone app. It starts here on any screen.'
           : 'Type this code in the GlassTube iPhone app.';
       }
-      if (d.dest && (d.dest.id || (d.dest.videos && d.dest.videos[0])) && d.destSeq !== pairLastSeq) {
+      const dest = d.dest;
+      const playable = dest && (dest.id || (dest.videos && dest.videos[0]));
+      const special = dest && (dest.kind === 'channels' || dest.kind === 'channel');
+      if (dest && (playable || special) && d.destSeq !== pairLastSeq) {
         pairLastSeq = d.destSeq;
         fetch('/api/pair', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code: pairCode, ack: d.destSeq }),
         }).catch(() => {});
-        applyPush(d.dest);
+        applyPush(dest);
       }
     })
     .catch(e => {
@@ -775,16 +886,14 @@ function handlePlayerKey(e) {
   const key = e.key;
   if (isBackKey(key) || key === DPAD.LEFT) {
     e.preventDefault();
-    const t = (typeof Player !== 'undefined') ? Player.snapshot().time : 99;
-    if (queue.length > 1 && t < 3) playPrev();
-    else goBack();
+    goBack();
     return;
   }
   if (key === DPAD.SELECT || key === ' ') {
     e.preventDefault();
+    needGesture = false;
     if (typeof Player !== 'undefined') Player.toggle();
-    const gate = $('#play-gate');
-    if (gate) gate.classList.add('hidden');
+    setPlayGate(false);
     updateChrome();
     return;
   }
@@ -794,9 +903,10 @@ function handlePlayerKey(e) {
     updateChrome();
     return;
   }
-  if (key === DPAD.UP) {
+  if (key === DPAD.UP || key === 'Up' || e.code === 'ArrowUp') {
     e.preventDefault();
-    if (typeof Player !== 'undefined') Player.seek(-10);
+    if (queue.length > 1) playPrev();
+    else if (typeof Player !== 'undefined') Player.seek(-10);
     updateChrome();
     return;
   }
@@ -812,9 +922,15 @@ document.addEventListener('keydown', function (e) {
     return;
   }
   const key = e.key;
-  if (isBackKey(key) || key === DPAD.LEFT) {
+  if (isBackKey(key)) {
     e.preventDefault();
     goBack();
+    return;
+  }
+  if (key === DPAD.LEFT) {
+    e.preventDefault();
+    if (current === 'home') moveFocus('up');
+    else goBack();
     return;
   }
   if (key === DPAD.UP) { e.preventDefault(); moveFocus('up'); return; }

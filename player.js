@@ -6,6 +6,8 @@ const Player = (() => {
   let playRetry = 0;
   let ignoreEnded = false;
   let lastError = '';
+  let holdPause = false;
+  let hasPlayed = false;
   let onEnded = null;
   let onChange = null;
   const poster = () => document.getElementById('yt-poster');
@@ -145,6 +147,8 @@ const Player = (() => {
 
   function load(video, autoplay, startAt) {
     lastError = '';
+    holdPause = false;
+    hasPlayed = false;
     destroy();
     showPoster(video.thumb || ('https://i.ytimg.com/vi/' + video.id + '/hqdefault.jpg'));
     return ensureApi().then(function (ok) {
@@ -189,6 +193,8 @@ const Player = (() => {
           onStateChange: function (e) {
             holdFocus();
             if (e.data === 1) {
+              hasPlayed = true;
+              holdPause = false;
               if (!(prefs() && prefs().audioOnly())) hidePoster();
               applyRate();
               applyCaptions();
@@ -198,6 +204,7 @@ const Player = (() => {
                 try { e.target.mute(); } catch (err) { /* ignored */ }
               }
             }
+            if (e.data === 2) holdPause = true;
             if (e.data === 0 && !ignoreEnded && typeof onEnded === 'function') onEnded();
             if (typeof onChange === 'function') onChange(e.data);
           },
@@ -217,7 +224,7 @@ const Player = (() => {
       lockIframe();
       tick = setInterval(function () {
         holdFocus();
-        if (autoplay && yt && state() !== 1 && state() !== 0 && !lastError && playRetry < 8) {
+        if (autoplay && !hasPlayed && !holdPause && yt && state() !== 1 && state() !== 0 && !lastError && playRetry < 8) {
           playRetry += 1;
           tryPlay(playRetry < 4);
           if (playRetry >= 4 && soundOn()) {
@@ -238,11 +245,14 @@ const Player = (() => {
   function toggle() {
     const s = state();
     if (!yt) return;
-    if (s === 1) yt.pauseVideo();
-    else {
-      applyAll();
-      yt.playVideo();
+    if (s === 1) {
+      holdPause = true;
+      yt.pauseVideo();
+      return;
     }
+    holdPause = false;
+    applyAll();
+    yt.playVideo();
   }
 
   function pause() {
@@ -266,10 +276,15 @@ const Player = (() => {
       t = yt && yt.getCurrentTime ? yt.getCurrentTime() : 0;
       d = yt && yt.getDuration ? yt.getDuration() : 0;
     } catch (e) { /* not ready */ }
+    const s = state();
     return {
       time: t || 0,
       duration: d || 0,
-      playing: state() === 1,
+      state: s,
+      playing: s === 1,
+      paused: s === 2,
+      buffering: s === 3,
+      ended: s === 0,
       error: lastError,
     };
   }

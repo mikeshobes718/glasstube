@@ -65,12 +65,39 @@ export default async function handler(req, res) {
   const code = String(body.code || '').trim();
   const raw = String(body.url || body.q || '').trim();
   const incoming = Array.isArray(body.videos) ? body.videos : null;
+  const channels = Array.isArray(body.channels) ? body.channels : null;
+  const openChannel = body.openChannel || null;
   if (!code) return json(res, 200, { ok: false, error: 'Pairing code required' });
-  if (!raw && !(incoming && incoming.length)) {
+  if (!channels && !(openChannel && openChannel.id) && !raw && !(incoming && incoming.length)) {
     return json(res, 200, { ok: false, error: 'Paste a YouTube link or send a playlist' });
   }
 
   try {
+    if (channels) {
+      const list = channels.slice(0, 24).map(c => ({
+        name: String((c && c.name) || 'Channel').slice(0, 80),
+        id: String((c && c.id) || ''),
+      })).filter(c => /^UC[a-zA-Z0-9_-]{20,}$/.test(c.id));
+      const out = await rpc('glasstube_push', {
+        p_code: code,
+        p_video: { kind: 'channels', channels: list },
+      });
+      return json(res, 200, Object.assign({ ok: true }, out, { kind: 'channels', channels: list }));
+    }
+
+    if (openChannel && openChannel.id) {
+      const ch = {
+        kind: 'channel',
+        id: String(openChannel.id),
+        name: String(openChannel.name || 'Channel').slice(0, 80),
+      };
+      if (!/^UC[a-zA-Z0-9_-]{20,}$/.test(ch.id)) {
+        return json(res, 200, { ok: false, error: 'That channel id looks wrong.' });
+      }
+      const out = await rpc('glasstube_push', { p_code: code, p_video: ch });
+      return json(res, 200, Object.assign({ ok: true }, out, { kind: 'channel', channel: ch }));
+    }
+
     let videos = [];
     let name = String(body.name || '').slice(0, 80);
 
