@@ -11,10 +11,11 @@
 <link rel="apple-touch-icon" type="image/png" href="/apple-touch-icon.png?v=2" sizes="180x180">
 <link rel="preload" href="/icon-192.png?v=2" as="image">
 <meta name="theme-color" content="#000000">
+<meta name="referrer" content="origin">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=12">
+<link rel="stylesheet" href="/styles.css?v=15">
 <script>
 (function () {
   function onPhone() {
@@ -60,8 +61,18 @@
 </script>
 <script>
 window.glasstubeErrors = [];
-window.glasstubeReport = function (text) {
+window.glasstubeNoise = function (text, src) {
+  var t = String(text || '');
+  var s = String(src || '');
+  return /script error\.?$/i.test(t) ||
+    /www-widgetapi|iframe_api|youtube\.com|youtube-nocookie|ytimg\.com/i.test(t + ' ' + s) ||
+    /blocked a frame|resizeobserver|play\(\) request was interrupted|notallowederror|the play\(\) request/i.test(t);
+};
+window.glasstubeReport = function (text, src) {
   window.glasstubeErrors.push(text);
+  if (window.glasstubeNoise(text, src)) return;
+  var player = document.getElementById('screen-player');
+  if (player && !player.classList.contains('hidden')) return;
   var bar = document.getElementById('errbar');
   if (bar) {
     bar.textContent = text;
@@ -70,12 +81,12 @@ window.glasstubeReport = function (text) {
 };
 window.onerror = function (msg, src, line, col) {
   var file = src ? String(src).split('/').pop() : '?';
-  window.glasstubeReport('JS error: ' + msg + ' (' + file + ':' + line + ':' + col + ')');
-  return false;
+  window.glasstubeReport('JS error: ' + msg + ' (' + file + ':' + line + ':' + col + ')', src);
+  return true;
 };
 window.addEventListener('unhandledrejection', function (e) {
   var r = e && e.reason;
-  window.glasstubeReport('Async error: ' + ((r && r.message) || r || 'unknown'));
+  window.glasstubeReport('Async error: ' + ((r && r.message) || r || 'unknown'), (r && r.stack) || '');
 });
 </script>
 </head>
@@ -98,10 +109,10 @@ window.addEventListener('unhandledrejection', function (e) {
   </header>
   <div class="list list-home screen-body">
     <button class="focusable menu-btn hidden" id="btn-continue" data-menu="continue">Continue<small id="continue-sub"></small></button>
+    <button class="focusable menu-btn" data-menu="phone">From iPhone<small>Paste a YouTube link, it plays here</small></button>
     <button class="focusable menu-btn" data-menu="recents">Recents</button>
     <button class="focusable menu-btn" data-menu="channels">Channels<small>Your list from the phone</small></button>
-    <button class="focusable menu-btn" data-menu="playlists">Playlists<small>Lists you sent from the phone</small></button>
-    <button class="focusable menu-btn" data-menu="phone">From phone<small>Paste a YouTube link on your iPhone</small></button>
+    <button class="focusable menu-btn" data-menu="playlists">Playlists<small>Lists you sent from the iPhone</small></button>
     <button class="focusable menu-btn" data-menu="settings">Settings</button>
     <button class="focusable menu-btn" data-menu="debug">Diagnostics</button>
   </div>
@@ -115,7 +126,7 @@ window.addEventListener('unhandledrejection', function (e) {
 
 <section id="screen-player" class="screen screen-flush hidden">
   <div id="yt-wrap">
-    <div id="yt-slot"><div id="yt-host"></div></div>
+    <div id="yt-slot"><iframe id="yt-host" src="about:blank" referrerpolicy="origin" allow="autoplay; encrypted-media; picture-in-picture" tabindex="-1"></iframe></div>
     <img id="yt-poster" alt="">
     <div id="player-bar"><div id="player-fill"></div></div>
     <div id="player-time">0:00 / 0:00</div>
@@ -139,7 +150,7 @@ window.addEventListener('unhandledrejection', function (e) {
 </section>
 
 <section id="screen-phone" class="screen hidden">
-  <h2 class="title">From phone</h2>
+  <h2 class="title">From iPhone</h2>
   <div class="screen-body">
     <div id="pair-code" class="pair-code">------</div>
     <div id="pair-help" class="pair-help">Getting a code...</div>
@@ -174,7 +185,10 @@ window.addEventListener('unhandledrejection', function (e) {
 <section id="screen-debug" class="screen hidden">
   <h2 class="title">Diagnostics</h2>
   <div id="debug-rows" class="debug-rows screen-body"></div>
+  <textarea id="debug-log" readonly rows="8"></textarea>
+  <div id="debug-copy-msg" class="pair-help"></div>
   <div class="list back-row">
+    <button class="focusable back-btn" id="btn-copy-debug">Copy errors</button>
     <button class="focusable back-btn" id="btn-retest">Run self-test</button>
     <button class="focusable back-btn" id="btn-debug-back">Back <span class="back-hint">swipe left</span></button>
   </div>
@@ -184,8 +198,8 @@ window.addEventListener('unhandledrejection', function (e) {
 
 <script src="/sound.js?v=7"></script>
 <script src="/prefs.js?v=7"></script>
-<script src="/player.js?v=9"></script>
-<script src="/app.js?v=11"></script>
+<script src="/player.js?v=23"></script>
+<script src="/app.js?v=30"></script>
 </div>
 </body>
 </html>

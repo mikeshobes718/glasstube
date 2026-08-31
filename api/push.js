@@ -1,16 +1,28 @@
 import { rpc, rpcConfigured, readBody, json } from './_rpc.js';
-import { parseYouTube, oembed, resolveHandle, channelFeed, playlistFeed } from './_yt.js';
+import { parseYouTube, oembed, keepPlayable, resolveHandle, channelFeed, playlistFeed } from './_yt.js';
 
 const VIDEO_RE = /^[a-zA-Z0-9_-]{11}$/;
 const MAX_PLAYLIST = 20;
 
 function slim(video) {
-  return {
+  const row = {
     id: video.id,
     title: String(video.title || 'YouTube video').slice(0, 120),
     channel: String(video.channel || '').slice(0, 80),
     thumb: video.thumb || ('https://i.ytimg.com/vi/' + video.id + '/hqdefault.jpg'),
   };
+  const u = String(video.u || '');
+  if (/^http:\/\/\d{1,3}(?:\.\d{1,3}){3}:\d+\/s\/[a-zA-Z0-9_-]{11}$/.test(u)) {
+    row.u = u;
+  } else if (
+    /^https:\/\/[a-z0-9.-]*googlevideo\.com\//i.test(u) &&
+    /videoplayback/i.test(u) &&
+    /[?&]itag=(18|22)(?:&|$)/.test(u) &&
+    u.length >= 100
+  ) {
+    row.u = u.slice(0, 4000);
+  }
+  return row;
 }
 
 async function resolveOne(raw) {
@@ -19,20 +31,17 @@ async function resolveOne(raw) {
 
   if (parsed.kind === 'playlist') {
     const feed = await playlistFeed(parsed.id, MAX_PLAYLIST);
+    const videos = await keepPlayable((feed.videos || []).map(slim));
     return {
       list: true,
       name: feed.title || 'Playlist',
-      videos: (feed.videos || []).map(slim),
+      videos,
     };
   }
 
   if (parsed.kind === 'video') {
-    const video = (await oembed(parsed.id)) || {
-      id: parsed.id,
-      title: 'YouTube video',
-      channel: '',
-      thumb: 'https://i.ytimg.com/vi/' + parsed.id + '/hqdefault.jpg',
-    };
+    const video = await oembed(parsed.id);
+    if (!video) return null;
     return { list: false, video: slim(video) };
   }
 
@@ -53,6 +62,7 @@ function pack(videos, name) {
   return Object.assign({}, first, {
     playlist: name || (videos.length > 1 ? 'Playlist' : ''),
     videos,
+    ts: Date.now(),
   });
 }
 
@@ -115,7 +125,12 @@ export default async function handler(req, res) {
     } else {
       const got = await resolveOne(raw);
       if (!got) {
-        return json(res, 200, { ok: false, error: 'That does not look like a YouTube link.' });
+        return json(res, 200, {
+          ok: false,
+          error: parseYouTube(raw)
+            ? 'YouTube blocked that video from other apps.'
+            : 'That does not look like a YouTube link.',
+        });
       }
       if (got.list) {
         videos = got.videos;
@@ -127,11 +142,18 @@ export default async function handler(req, res) {
 
     videos = videos.filter((v, i, all) => v && v.id && all.findIndex(x => x.id === v.id) === i)
       .slice(0, MAX_PLAYLIST);
+    videos = await keepPlayable(videos);
     if (!videos.length) {
       return json(res, 200, { ok: false, error: 'No playable videos in that list.' });
     }
 
     const payload = pack(videos, name);
+    const first = videos[0] || {};
+    console.log('[glasstube-push]', JSON.stringify({
+      id: first.id || '',
+      hasU: !!first.u,
+      n: videos.length,
+    }));
     const out = await rpc('glasstube_push', { p_code: code, p_video: payload });
     return json(res, 200, Object.assign({}, out, { video: videos[0], videos, name: payload.playlist }));
   } catch (e) {

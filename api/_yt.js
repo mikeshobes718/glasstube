@@ -55,6 +55,32 @@ export async function oembed(id) {
   };
 }
 
+export async function keepPlayable(videos) {
+  const list = (videos || []).filter(v => v && v.id);
+  if (!list.length) return [];
+  const rows = await Promise.all(list.map(async (v) => {
+    try {
+      const meta = await oembed(v.id);
+      if (!meta) return { ok: false, net: false, video: null };
+      return {
+        ok: true,
+        net: false,
+        video: Object.assign({}, v, {
+          title: (v.title && v.title !== 'YouTube video') ? v.title : meta.title,
+          channel: v.channel || meta.channel,
+          thumb: v.thumb || meta.thumb,
+        }),
+      };
+    } catch (e) {
+      return { ok: true, net: true, video: v };
+    }
+  }));
+  const kept = rows.filter(r => r.ok && r.video).map(r => r.video);
+  if (kept.length) return kept;
+  if (rows.every(r => !r.net)) return [];
+  return list;
+}
+
 export async function resolveHandle(handle) {
   const r = await fetch('https://www.youtube.com/@' + encodeURIComponent(handle), {
     headers: { 'user-agent': 'Mozilla/5.0 GlassTube' },

@@ -344,6 +344,8 @@ html, body {
 
 .status.status-err { color: #ff8983; }
 
+body.hud-player .errbar { display: none !important; }
+
 .errbar {
   position: absolute;
   left: 0;
@@ -392,6 +394,8 @@ html, body {
   height: 338px;
   border: 0;
   pointer-events: none;
+  object-fit: contain;
+  background: #000;
 }
 
 #yt-poster {
@@ -598,6 +602,26 @@ html, body {
   color: #ff8983;
   text-align: left;
   margin-top: 8px;
+  white-space: pre-wrap;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+#debug-log {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  margin: 8px 0 4px;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  font: 13px/1.35 ui-monospace, Menlo, monospace;
+  color: #eee;
+  background: #1a1a1a;
+  border: 0;
+  border-radius: 8px;
+  resize: vertical;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 #btn-pair-new.menu-btn {

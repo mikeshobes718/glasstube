@@ -6,6 +6,7 @@
 <meta name="description" content="Send a YouTube link to GlassTube on Meta Ray-Ban Display glasses">
 <meta name="theme-color" content="#ffffff">
 <title>GlassTube phone</title>
+<meta name="glasstube-phone" content="6">
 <link rel="icon" type="image/png" href="/icon-192.png?v=2">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" sizes="180x180">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -62,6 +63,9 @@ header {
 }
 header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.2px; }
 header p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+#send-card { padding-top: 16px; }
+#send-card h2 { font-size: 22px; }
+#send-card .paired { padding-top: 0; padding-bottom: 14px; }
 main { padding: 0; max-width: 620px; margin: 0 auto; }
 section {
   background: var(--card);
@@ -120,6 +124,33 @@ button.tiny { min-height: 32px; width: auto; padding: 6px 12px; margin: 0; font-
 .msg { margin-top: 10px; font-size: 14px; min-height: 20px; }
 .msg.ok { color: var(--good); }
 .msg.err { color: var(--bad); }
+#error-log {
+  display: block;
+  width: 100%;
+  min-height: 140px;
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  font: 12px/1.4 ui-monospace, Menlo, monospace;
+  color: var(--ink);
+  background: var(--chip);
+  border: 0;
+  border-radius: 12px;
+  resize: vertical;
+  -webkit-user-select: text;
+  user-select: text;
+}
+#copy-toast {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 24px;
+  z-index: 50;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #0f0f0f;
+  color: #fff;
+  font: 15px/1.3 Roboto, system-ui, sans-serif;
+}
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .chips button {
   width: auto;
@@ -262,7 +293,7 @@ button.google {
 <section id="pair-card">
   <h2>Pair with your glasses</h2>
   <ol class="steps" id="pair-steps">
-    <li>On the glasses, GlassTube shows a six character code under <b>From phone</b>.</li>
+    <li>On the glasses, GlassTube shows a six character code under <b>From iPhone</b>.</li>
     <li>Type that code here once.</li>
     <li>Paste a YouTube link and send. It starts on the glasses by itself.</li>
   </ol>
@@ -271,17 +302,45 @@ button.google {
            spellcheck="false" maxlength="7" placeholder="ABC123">
     <button id="btn-connect">Connect</button>
   </div>
+  <div id="pair-msg" class="msg"></div>
+</section>
+
+<section id="send-card" hidden>
   <div id="pair-ok" class="paired" hidden>
     <span>Paired to <b id="code-shown"></b></span>
     <button class="slim ghost" id="btn-unpair">Change</button>
   </div>
-  <div id="pair-msg" class="msg"></div>
+  <h2>Send a video</h2>
+  <p class="hint">Paste a youtube.com, youtu.be, or playlist link. A playlist plays through on the glasses by itself.</p>
+  <div class="row">
+    <input id="url" type="url" autocomplete="off" placeholder="https://youtu.be/...">
+    <button class="slim ghost" id="btn-paste">Paste</button>
+    <button class="slim ghost" id="btn-url-clear" hidden>Clear</button>
+  </div>
+  <button id="btn-send">Send to the glasses</button>
+  <div id="preview" hidden class="preview">
+    <img id="prev-img" alt="">
+    <div>
+      <div class="t" id="prev-title"></div>
+      <div class="c" id="prev-ch"></div>
+    </div>
+  </div>
+  <div id="send-msg" class="msg"></div>
 </section>
+
+<section id="error-card">
+  <h2>Errors</h2>
+  <p class="hint">Copy this and paste it in chat.</p>
+  <textarea id="error-log" readonly rows="10"></textarea>
+  <button type="button" class="slim" id="btn-copy-err">Copy errors</button>
+  <div id="copy-err-msg" class="msg"></div>
+</section>
+<div id="copy-toast" hidden>Copied. Paste it in chat.</div>
 
 <section id="account-card">
   <h2>YouTube account</h2>
   <div id="acct-out">
-    <p class="hint">Sign in to load your subscriptions, Liked videos, Watch Later, and YouTube playlists. Search uses your account too.</p>
+    <p class="hint">Sign in here before you send. This is the login that keeps the unlock screen away. The Sign in button on the YouTube unlock page is a different login and will ask again.</p>
     <button type="button" id="btn-google" class="google"><span class="gmark"></span>Continue with Google</button>
   </div>
   <div id="acct-in" hidden>
@@ -299,7 +358,7 @@ button.google {
 
 <section id="library-card" hidden>
   <h2>Your YouTube</h2>
-  <p class="hint">Search or open a list, then send it to the glasses. Pairing above still has to be connected.</p>
+  <p class="hint">Search or open a list, then send it to the glasses. Pair first if you have not yet.</p>
   <div class="row">
     <input id="yt-q" autocomplete="off" placeholder="Search YouTube">
     <button class="slim" id="btn-yt-search">Search</button>
@@ -329,25 +388,6 @@ button.google {
   </div>
   <button class="ghost" id="btn-subs-import">Add all subscriptions to Quick channels</button>
   <ul id="yt-subs" class="pl cap"></ul>
-</section>
-
-<section id="send-card" hidden>
-  <h2>Send a video</h2>
-  <p class="hint">Paste a youtube.com, youtu.be, or playlist link. A playlist plays through on the glasses by itself.</p>
-  <div class="row">
-    <input id="url" type="url" autocomplete="off" placeholder="https://youtu.be/...">
-    <button class="slim ghost" id="btn-paste">Paste</button>
-    <button class="slim ghost" id="btn-url-clear" hidden>Clear</button>
-  </div>
-  <button id="btn-send">Send to the glasses</button>
-  <div id="preview" hidden class="preview">
-    <img id="prev-img" alt="">
-    <div>
-      <div class="t" id="prev-title"></div>
-      <div class="c" id="prev-ch"></div>
-    </div>
-  </div>
-  <div id="send-msg" class="msg"></div>
 </section>
 
 <section id="quick-card" hidden>
@@ -440,6 +480,56 @@ let busy = false;
 function msg(el, text, kind) {
   el.textContent = text || '';
   el.className = 'msg' + (kind ? ' ' + kind : '');
+  if (kind === 'err' && text) logErr(text);
+}
+
+function logErr(text) {
+  const el = $('#error-log');
+  if (!el || !text) return;
+  const line = new Date().toISOString() + ' ' + String(text).trim();
+  el.value = (el.value ? el.value + '\n' : '') + line;
+  el.scrollTop = el.scrollHeight;
+}
+
+function logPushResult(d) {
+  if (!d) {
+    logErr('send: empty reply');
+    return;
+  }
+  logErr('send ok=' + d.ok + ' hasFile=' + d.hasFile + ' urlLen=' + (d.urlLen || 0) + ' itag=' + (d.itag || '') + (d.error ? (' err=' + d.error) : ''));
+  if (d.debug) logErr(d.debug);
+}
+
+function copyErrorLog() {
+  const el = $('#error-log');
+  const t = (el && el.value) ? el.value : 'No errors yet.';
+  function done() {
+    msg($('#copy-err-msg'), 'Copied. Paste it in chat.', 'ok');
+    const bar = $('#copy-toast');
+    if (bar) {
+      bar.hidden = false;
+      bar.textContent = 'Copied. Paste it in chat.';
+      clearTimeout(copyErrorLog.timer);
+      copyErrorLog.timer = setTimeout(function () { bar.hidden = true; }, 3000);
+    }
+  }
+  function fallback() {
+    if (!el) return;
+    el.focus();
+    el.select();
+    try { document.execCommand('copy'); done(); }
+    catch (e) { msg($('#copy-err-msg'), 'Select the Errors box, then copy.', 'err'); }
+  }
+  const wk = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.glasstube;
+  if (wk) {
+    try { wk.postMessage({ type: 'copy', text: t }); done(); return; }
+    catch (e) { /* fall through */ }
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(done).catch(fallback);
+    return;
+  }
+  fallback();
 }
 
 function normCode(v) {
@@ -459,6 +549,7 @@ function saveList(key, list) {
 }
 
 function setPaired(on) {
+  $('#pair-card').hidden = on;
   $('#pair-form').hidden = on;
   $('#pair-steps').hidden = on;
   $('#pair-ok').hidden = !on;
@@ -481,6 +572,16 @@ function setPaired(on) {
 
 function sessionToken() {
   try { return localStorage.getItem(SESSION_KEY) || ''; } catch (e) { return ''; }
+}
+
+function warnIfNoSession(el) {
+  if (sessionToken()) return false;
+  const text = 'Sign in under YouTube account first';
+  ;[el, $('#send-msg'), $('#lib-msg'), $('#acct-msg')].forEach(function (node) {
+    if (node) msg(node, text, 'err');
+  });
+  try { $('#account-card').scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+  return true;
 }
 
 function setSession(t) {
@@ -796,16 +897,17 @@ function playYtPlaylist(id, name) {
 
 function sendYtVideos(name, videos) {
   if (!code) {
-    msg($('#lib-msg'), 'Pair first. Open From phone on the glasses and type the code.', 'err');
+    msg($('#lib-msg'), 'Pair first. Open From iPhone on the glasses and type the code.', 'err');
     return;
   }
   if (!videos || !videos.length) {
     msg($('#lib-msg'), 'That list is empty.', 'err');
     return;
   }
-  keepPost('/api/push', { code: code, name: name, videos: videos }, () => {
+  sendPush({ code: code, name: name, videos: videos }, () => {
     msg($('#lib-msg'), 'No internet. Retrying...', 'err');
   }).then(d => {
+    logPushResult(d);
     if (!d.ok) {
       if (expired(d.error)) {
         dropPair(d.error);
@@ -1011,6 +1113,92 @@ function keepPost(url, body, onWait) {
   });
 }
 
+function canAskPhoneStream() {
+  try {
+    return !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.glasstube);
+  } catch (e) {
+    return false;
+  }
+}
+
+function askPhoneStream(id) {
+  return new Promise(function (resolve) {
+    if (!canAskPhoneStream() || !/^[a-zA-Z0-9_-]{11}$/.test(id)) {
+      resolve(null);
+      return;
+    }
+    let done = false;
+    function finish(url) {
+      if (done) return;
+      done = true;
+      window.removeEventListener('glasstubeStream', onEvt);
+      resolve(url && String(url).indexOf('https://') === 0 ? String(url) : null);
+    }
+    function onEvt(e) {
+      const d = e && e.detail;
+      finish(d && d.u ? String(d.u) : '');
+    }
+    window.addEventListener('glasstubeStream', onEvt);
+    setTimeout(function () { finish(''); }, 90000);
+    try { window.webkit.messageHandlers.glasstube.postMessage({ type: 'stream', id: id, s: sessionToken() }); }
+    catch (e) { finish(''); }
+  });
+}
+
+function withPhoneStreams(videos) {
+  if (!canAskPhoneStream() || !videos || !videos.length) return Promise.resolve(videos);
+  const out = [];
+  let i = 0;
+  function next() {
+    if (i >= videos.length || i >= 8) return Promise.resolve(out.concat(videos.slice(i)));
+    const v = videos[i++];
+    const id = (v && v.id && /^[a-zA-Z0-9_-]{11}$/.test(v.id))
+      ? v.id
+      : videoIdFrom(v && (v.url || v.id) || '');
+    if (!id) {
+      out.push(v);
+      return next();
+    }
+    return askPhoneStream(id).then(function (u) {
+      out.push(u ? Object.assign({}, v, { id: id, u: u }) : v);
+      return next();
+    });
+  }
+  return next();
+}
+
+function sendPush(body, onWait) {
+  warnIfNoSession();
+  const wk = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.glasstube;
+  if (wk) {
+    window.__gtPushNative = 1;
+    return new Promise(function (resolve, reject) {
+      let done = false;
+      function finish(d) {
+        if (done) return;
+        done = true;
+        window.removeEventListener('glasstubePushResult', on);
+        if (d && d.network) {
+          if (onWait) onWait();
+          setTimeout(function () {
+            sendPush(body, onWait).then(resolve).catch(reject);
+          }, 3000);
+          return;
+        }
+        resolve(d || { ok: false, error: 'Phone send failed.' });
+      }
+      function on(e) { finish(e && e.detail); }
+      window.addEventListener('glasstubePushResult', on);
+      setTimeout(function () {
+        finish({ ok: false, error: 'Send timed out. If YouTube asked you to tap, do that on this phone, then send again.' });
+      }, 100000);
+      try { wk.postMessage({ type: 'push', body: body, s: sessionToken() }); }
+      catch (e) { finish({ ok: false, error: 'Phone send failed.' }); }
+    });
+  }
+  return keepPost('/api/push', body, onWait);
+}
+
 function playlists() {
   return loadList(PLAYLISTS_KEY);
 }
@@ -1156,10 +1344,11 @@ function sendChannelLatest(ch, count) {
         msg($('#ch-msg'), (d && d.error) || 'No videos on that channel.', 'err');
         return;
       }
-      return keepPost('/api/push', { code: code, name: ch.name, videos: d.videos }, () => {
+      return sendPush({ code: code, name: ch.name, videos: d.videos }, () => {
         msg($('#ch-msg'), 'No internet. Retrying...', 'err');
       }).then(out => {
         busy = false;
+        logPushResult(out);
         if (!out.ok) {
           if (expired(out.error)) {
             dropPair(out.error);
@@ -1540,14 +1729,14 @@ function dropPair(reason) {
   code = '';
   try { localStorage.removeItem(CODE_KEY); } catch (e) {}
   setPaired(false);
-  msg($('#pair-msg'), reason || 'Pair again. Open From phone on the glasses first.', 'err');
+  msg($('#pair-msg'), reason || 'Pair again. Open From iPhone on the glasses first.', 'err');
   $('#code').focus();
 }
 
 function connect(c) {
   const want = normCode(c);
   if (want.length !== 6) {
-    msg($('#pair-msg'), 'Codes are six characters. Open From phone on the glasses to see yours.', 'err');
+    msg($('#pair-msg'), 'Codes are six characters. Open From iPhone on the glasses to see yours.', 'err');
     return;
   }
   msg($('#pair-msg'), 'Checking...');
@@ -1555,7 +1744,7 @@ function connect(c) {
     msg($('#pair-msg'), 'No internet. Retrying...', 'err');
   }).then(d => {
     if (!d.ok) {
-      msg($('#pair-msg'), d.error || 'That code is not active. Open From phone on the glasses first.', 'err');
+      msg($('#pair-msg'), d.error || 'That code is not active. Open From iPhone on the glasses first.', 'err');
       return;
     }
     code = want;
@@ -1571,7 +1760,7 @@ function sendVideo(item) {
     ? (item.url || ('https://youtu.be/' + item.id))
     : $('#url').value.trim();
   if (!code) {
-    msg($('#send-msg'), 'Pair first. Open From phone on the glasses and type the code.', 'err');
+    msg($('#send-msg'), 'Pair first. Open From iPhone on the glasses and type the code.', 'err');
     return;
   }
   if (!url) {
@@ -1581,11 +1770,13 @@ function sendVideo(item) {
   if (item && item.url) $('#url').value = item.url;
   if (busy) return;
   busy = true;
-  msg($('#send-msg'), 'Sending...');
-  keepPost('/api/push', { code: code, url: url }, () => {
+  logErr('send start ' + url);
+  msg($('#send-msg'), 'Getting a playable file. If YouTube asks, tap Confirm on this phone.');
+  sendPush({ code: code, url: url }, () => {
     msg($('#send-msg'), 'No internet. Retrying...', 'err');
   }).then(d => {
     busy = false;
+    logPushResult(d);
     if (!d.ok) {
       if (expired(d.error)) {
         dropPair(d.error);
@@ -1607,6 +1798,10 @@ function sendVideo(item) {
     (d.videos || [v]).forEach(item => rememberVideo(item, item.url));
     syncClearBtn($('#url'), $('#btn-url-clear'));
     buzz();
+    if (d.hasFile === false) {
+      msg($('#send-msg'), d.fileError || 'Sent, but YouTube blocked the file on this phone. Stay on WiFi, keep the Phone tab open, then send again.', 'err');
+      return;
+    }
     msg($('#send-msg'), many
       ? 'Sent ' + d.videos.length + ' videos. They play one after another on the glasses.'
       : 'Sent "' + (v.title || 'video') + '". It should start on the glasses now.', 'ok');
@@ -1629,10 +1824,11 @@ function sendPlaylist(i) {
   if (busy) return;
   busy = true;
   msg($('#pl-msg'), 'Sending...');
-  keepPost('/api/push', { code: code, name: p.name, videos: p.videos }, () => {
+  sendPush({ code: code, name: p.name, videos: p.videos }, () => {
     msg($('#pl-msg'), 'No internet. Retrying...', 'err');
   }).then(d => {
     busy = false;
+    logPushResult(d);
     if (!d.ok) {
       if (expired(d.error)) dropPair(d.error);
       msg($('#pl-msg'), d.error || 'Could not send.', 'err');
@@ -1707,6 +1903,23 @@ $('#code').addEventListener('input', () => {
 });
 $('#btn-unpair').addEventListener('click', () => dropPair(''));
 $('#btn-send').addEventListener('click', () => sendVideo());
+$('#btn-copy-err').addEventListener('click', copyErrorLog);
+window.addEventListener('error', function (e) {
+  logErr('JS ' + (e.message || '') + ' ' + ((e.filename || '').split('/').pop()) + ':' + (e.lineno || ''));
+});
+window.addEventListener('unhandledrejection', function (e) {
+  const r = e && e.reason;
+  logErr('async ' + ((r && r.message) || r || 'unknown'));
+});
+window.addEventListener('glasstubeLog', function (e) {
+  const d = e && e.detail;
+  if (d) logErr(typeof d === 'string' ? d : JSON.stringify(d));
+});
+window.addEventListener('glasstubeSession', function (e) {
+  const d = e && e.detail;
+  if (d && d.s) setSession(d.s);
+});
+logErr('phone page ready v=6');
 $('#url').addEventListener('keydown', e => { if (e.key === 'Enter') sendVideo(); });
 $('#url').addEventListener('input', () => syncClearBtn($('#url'), $('#btn-url-clear')));
 $('#btn-url-clear').addEventListener('click', () => {
@@ -1739,10 +1952,11 @@ $('#btn-play-recents').addEventListener('click', () => {
   }
   if (busy) return;
   busy = true;
-  keepPost('/api/push', { code: code, name: 'Recents', videos: rec }, () => {
+  sendPush({ code: code, name: 'Recents', videos: rec }, () => {
     msg($('#send-msg'), 'No internet. Retrying...', 'err');
   }).then(d => {
     busy = false;
+    logPushResult(d);
     if (!d.ok) {
       msg($('#send-msg'), d.error || 'Could not send.', 'err');
       return;

@@ -12,6 +12,7 @@ export default async function handler(req, res) {
       part: 'snippet',
       q,
       type: 'video',
+      videoEmbeddable: 'true',
       maxResults: '12',
     });
     let videos = (d.items || []).map(item => {

@@ -27,17 +27,25 @@ struct RootView: View {
     @State private var authBlob = ""
     @State private var reloadToken: [GlassPage: Int] = [.phone: 0, .hud: 0]
     @State private var ready: [GlassPage: Bool] = [.phone: false, .hud: false]
+    @State private var unlockId: String?
+    @State private var unlockKeep: String?
 
     private var phoneURL: URL {
         var parts = URLComponents(string: "https://glasstube.vercel.app/phone")!
+        var items = [URLQueryItem(name: "v", value: "6")]
         if let raw = pendingWatch, !raw.isEmpty {
-            parts.queryItems = [URLQueryItem(name: "url", value: raw)]
+            items.append(URLQueryItem(name: "url", value: raw))
         }
+        parts.queryItems = items
         return parts.url!
     }
 
     private var hudURL: URL {
         URL(string: "https://glasstube.vercel.app/")!
+    }
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
     }
 
     var body: some View {
@@ -47,9 +55,16 @@ struct RootView: View {
                     .resizable()
                     .frame(width: 28, height: 28)
                     .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                Text("GlassTube")
-                    .font(.headline)
-                    .foregroundStyle(Color(red: 0, green: 0.83, blue: 1))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("GlassTube")
+                        .font(.headline)
+                        .foregroundStyle(Color(red: 0, green: 0.83, blue: 1))
+                    if !appVersion.isEmpty {
+                        Text(appVersion)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color(white: 0.72))
+                    }
+                }
                 Picker("Page", selection: $page) {
                     ForEach(GlassPage.allCases) { item in
                         Text(item.title).tag(item)
@@ -90,12 +105,28 @@ struct RootView: View {
                 .opacity(page == .hud ? 1 : 0)
                 .allowsHitTesting(page == .hud)
 
-                if ready[page] != true {
+                if let id = unlockId ?? unlockKeep {
+                    YouTubeUnlockScreen(videoId: id)
+                        .opacity(unlockId == nil ? 0 : 1)
+                        .allowsHitTesting(unlockId != nil)
+                }
+
+                if ready[page] != true && unlockId == nil {
                     BrandSplash()
                 }
             }
         }
         .background(Color.black.ignoresSafeArea())
+        .onReceive(NotificationCenter.default.publisher(for: .gtUnlock)) { note in
+            if let id = note.userInfo?["id"] as? String, !id.isEmpty {
+                page = .phone
+                unlockKeep = id
+                unlockId = id
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .gtUnlockDone)) { _ in
+            unlockId = nil
+        }
         .onOpenURL { incoming in
             if incoming.scheme == "glasstube" && incoming.host == "oauth" {
                 let items = URLComponents(url: incoming, resolvingAgainstBaseURL: false)?.queryItems

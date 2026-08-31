@@ -32,7 +32,7 @@ export function readBody(req) {
   }
   return new Promise(resolve => {
     let s = '';
-    req.on('data', c => { s += c; if (s.length > 20000) s = s.slice(0, 20000); });
+    req.on('data', c => { s += c; if (s.length > 200000) s = s.slice(0, 200000); });
     req.on('end', () => { try { resolve(JSON.parse(s)); } catch (e) { resolve(null); } });
     req.on('error', () => resolve(null));
   });

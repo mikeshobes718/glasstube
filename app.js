@@ -22,6 +22,8 @@ const CHANNEL_PAGE = 5;
 const MAX_RECENTS = 12;
 const PAIR_POLL_MS = 2000;
 const RETRY_MS = 3000;
+const PUSH_FRESH_MS = 10 * 60 * 1000;
+const WAY_KEY = 'glasstube.way6';
 const RECENTS_KEY = 'glasstube.recents';
 const PAIR_KEY = 'glasstube.pair';
 const PLAYLISTS_KEY = 'glasstube.playlists';
@@ -54,6 +56,12 @@ let feedWait = '';
 let nowPlaying = null;
 let netOffline = false;
 let loadRetry = 0;
+let wayChain = [0];
+let wayPos = 0;
+let wayFor = '';
+let skipIds = {};
+let playFails = [];
+let blockedFor = '';
 let needGesture = false;
 let sleepUntil = 0;
 let sleepWatch = 0;
@@ -137,10 +145,16 @@ function show(name) {
     nowPlaying = null;
   }
   current = name;
+  document.body.classList.toggle('hud-player', name === 'player');
   Object.keys(screens).forEach(k => {
     if (screens[k]) screens[k].classList.toggle('hidden', k !== name);
   });
   setStatus('');
+  const bar = $('#errbar');
+  if (bar && name === 'player') {
+    bar.classList.add('hidden');
+    bar.textContent = '';
+  }
   if (name !== 'player') focusFirst();
 }
 
@@ -276,6 +290,7 @@ function renderContinue() {
 function openContinue() {
   const p = progressLoad();
   if (!p) return;
+  skipIds = {};
   if (p.queue && p.queue.length) {
     queue = p.queue.map(v => Object.assign({}, v, { _listTitle: p.listTitle || 'Continue' }));
     openPlayer(Math.min(p.queueIndex || 0, queue.length - 1), true, p.t);
@@ -365,7 +380,7 @@ function goBack() {
     progressSave();
     if (typeof Player !== 'undefined') Player.destroy();
     nowPlaying = null;
-    if (queue.length && queueTitle() !== 'From phone') {
+    if (queue.length && queueTitle() !== 'From iPhone' && queueTitle() !== 'From phone') {
       showVideoList(queueTitle(), queue, listBack || (() => show('home')));
       return;
     }
@@ -429,6 +444,7 @@ function renderList(title, items, emptyText, onBack, backLabel, kind) {
 }
 
 function showVideoList(title, videos, onBack) {
+  skipIds = {};
   queue = videos.map(v => Object.assign({}, v, { _listTitle: title }));
   const items = [];
   if (videos.length > 1) {
@@ -477,10 +493,128 @@ function setPlayGate(on, title, text) {
   if (msg && text) msg.textContent = text;
 }
 
-function openPlayer(index, autoplay, startAt) {
+function isDeadVideo(code) {
+  return code === 2 || code === 100;
+}
+
+function wayCount() {
+  return (typeof Player !== 'undefined' && Player.ways) ? Player.ways() : 5;
+}
+
+function savedWay() {
+  try {
+    const n = Number(localStorage.getItem(WAY_KEY));
+    return (n >= 0 && n < wayCount()) ? n : 0;
+  } catch (e) { return 0; }
+}
+
+function rememberWay(n) {
+  if (n !== 0) return;
+  try { localStorage.setItem(WAY_KEY, String(n)); } catch (e) { /* private mode */ }
+}
+
+function buildWayChain() {
+  const n = wayCount();
+  const chain = [];
+  for (let i = 0; i < n; i++) chain.push(i);
+  return chain;
+}
+
+function diagSend(kind, extra) {
+  try {
+    fetch('/api/diag', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({
+        kind: kind,
+        ua: navigator.userAgent,
+        ref: document.referrer || '',
+        origin: String(window.location.origin || ''),
+        when: new Date().toISOString(),
+      }, extra || {})),
+    }).catch(function () { /* diagnostics only */ });
+  } catch (e) { /* never break playback for telemetry */ }
+}
+
+function playFailNote(err, code) {
+  const id = (nowPlaying && nowPlaying.id) || '?';
+  const s = Player.lastStrategy ? Player.lastStrategy() : 0;
+  playFails.unshift(id + ' · code ' + (code || '?') + ' · way ' + s + ' · ' + (err || 'unknown'));
+  playFails = playFails.slice(0, 10);
+  diagSend('fail', { id: id, code: code || 0, way: s, err: String(err || '').slice(0, 120) });
+}
+
+function blockedText(code, err) {
+  if (/playable file/i.test(String(err || ''))) {
+    return 'The phone could not get a playable file. Stay on the Phone tab, use WiFi, and send again.';
+  }
+  if (/HTML5 media 4/i.test(String(err || ''))) {
+    return String(err) + '. Put the phone and the glasses on the same WiFi, then send again.';
+  }
+  if (/HTML5 media/i.test(String(err || ''))) {
+    return String(err) + '. The glasses could not play the file the phone sent.';
+  }
+  if (code === 100) return 'That video is gone or private.';
+  if (code === 2) return 'That video link is broken.';
+  if (code === 7 || code === 5) {
+    return 'YouTube blocked this phone from fetching the video. Stay on the Phone tab, use WiFi, and send again. Raw: ' + (err || ('code ' + code));
+  }
+  return 'YouTube refused to play this video here (error ' + (code || '?') + '). ' + (err || '');
+}
+
+function skipUnplayable(err, code) {
+  playFailNote(err, code);
+  if (nowPlaying && nowPlaying.id) skipIds[nowPlaying.id] = true;
+  for (let i = 1; i <= queue.length; i++) {
+    const idx = (queueIndex + i) % queue.length;
+    const v = queue[idx];
+    if (v && v.id && !skipIds[v.id]) {
+      setStatus('Skipped one video YouTube would not play.', false);
+      openPlayer(idx, true);
+      return;
+    }
+  }
+  setLoading(false);
+  setPlayGate(false);
+  blockedFor = (nowPlaying && nowPlaying.id) || '';
+  $('#player-error').textContent = queue.length > 1
+    ? 'No video in this list would play. ' + blockedText(code, err)
+    : blockedText(code, err);
+  $('#player-error').classList.remove('hidden');
+}
+
+/* Quietly move to the next embed strategy for this video. Returns true when
+   another attempt is coming, false when the chain is exhausted. */
+function tryNextWay(videoId, err, code) {
+  if (!videoId || isDeadVideo(code) || wayFor !== videoId) return false;
+  if (loadRetry) return true;
+  if (wayPos + 1 >= wayChain.length) return false;
+  playFailNote(err, code);
+  wayPos += 1;
+  loadRetry = setTimeout(function () {
+    loadRetry = 0;
+    if (current === 'player' && nowPlaying && nowPlaying.id === videoId) {
+      openPlayer(queueIndex, true, 0, { retry: true });
+    }
+  }, 600 + wayPos * 300);
+  return true;
+}
+
+function openPlayer(index, autoplay, startAt, opts) {
   if (index < 0 || index >= queue.length) return;
+  opts = opts || {};
   queueIndex = index;
   const video = queue[index];
+  if (!opts.retry) {
+    if (loadRetry) {
+      clearTimeout(loadRetry);
+      loadRetry = 0;
+    }
+    wayChain = buildWayChain();
+    wayPos = 0;
+    wayFor = video.id;
+  }
+  if (blockedFor && blockedFor !== video.id) blockedFor = '';
   nowPlaying = video;
   recentsAdd(video);
   $('#player-title').textContent = video.title || 'YouTube video';
@@ -497,26 +631,14 @@ function openPlayer(index, autoplay, startAt) {
     $('#player-error').classList.remove('hidden');
     return;
   }
+  const attempt = wayPos;
   Player.setHandlers(playNext, updateChrome);
-  Player.load(video, autoplay, startAt || 0).then(function (ok) {
+  Player.load(video, autoplay, startAt || 0, wayChain[wayPos] || 0).then(function (ok) {
     if (!ok) {
       const err = Player.lastError() || 'Could not start YouTube.';
-      $('#player-error').textContent = err;
-      $('#player-error').classList.remove('hidden');
-      if (/did not load|HTML5|error 5/i.test(err)) {
-        setOffline(true);
-        if (loadRetry) clearTimeout(loadRetry);
-        loadRetry = setTimeout(function () {
-          if (current === 'player' && nowPlaying && nowPlaying.id === video.id) {
-            openPlayer(queueIndex, true);
-          }
-        }, RETRY_MS);
-      }
+      const code = Player.lastCode ? Player.lastCode() : 0;
+      if (!tryNextWay(video.id, err, code)) skipUnplayable(err, code);
     } else {
-      if (loadRetry) {
-        clearTimeout(loadRetry);
-        loadRetry = 0;
-      }
       setOffline(false);
     }
     updateChrome();
@@ -524,12 +646,24 @@ function openPlayer(index, autoplay, startAt) {
       setTimeout(function () {
         if (current !== 'player') return;
         if (nowPlaying && nowPlaying.id !== video.id) return;
+        if (wayPos !== attempt) return;
         const snap = Player.snapshot();
         if (snap.playing || snap.paused || snap.error) return;
         needGesture = true;
         setPlayGate(true, video.title, 'Enter to play');
         updateChrome();
       }, 2800);
+      setTimeout(function () {
+        if (current !== 'player') return;
+        if (nowPlaying && nowPlaying.id !== video.id) return;
+        if (wayPos !== attempt) return;
+        const snap = Player.snapshot();
+        if (snap.playing || snap.paused || snap.ended || snap.error) return;
+        if (snap.time > 0.4) return;
+        if (!tryNextWay(video.id, 'player stalled', 0) && !needGesture) {
+          skipUnplayable('player stalled', 0);
+        }
+      }, 12000);
     }
   });
 }
@@ -580,10 +714,27 @@ function applyPush(dest) {
     return;
   }
   const list = (dest.videos && dest.videos.length) ? dest.videos : [dest];
-  const name = dest.playlist || 'From phone';
+  const name = dest.playlist || 'From iPhone';
+  skipIds = {};
+  if (dest.u) {
+    list.forEach(function (v) {
+      if (v && !v.u && (!dest.id || v.id === dest.id)) v.u = dest.u;
+    });
+    if (list[0] && !list[0].u) list[0].u = dest.u;
+  }
+  const firstU = (list[0] && list[0].u) || dest.u || '';
+  if (/^http:\/\/\d{1,3}(?:\.\d{1,3}){3}:\d+\//.test(firstU)) {
+    location.replace(firstU.replace('/s/', '/p/'));
+    return;
+  }
   const ordered = maybeShuffle(list);
   queue = ordered.map(v => Object.assign({}, v, { _listTitle: name }));
   playlistRemember(name, list);
+  diagSend('push', {
+    id: (queue[0] && queue[0].id) || '',
+    hasU: !!(queue[0] && queue[0].u),
+    origin: String(window.location.origin || ''),
+  });
   openPlayer(0, true);
   setStatus(list.length > 1
     ? 'Playing ' + name + ' · ' + list.length + ' videos.'
@@ -602,8 +753,9 @@ function updateChrome() {
     ? (' · Next ' + String(nxt.title).slice(0, 28))
     : '';
   let phase = 'Loading';
-  if (snap.error) phase = 'Error';
-  else if (snap.playing) phase = 'Enter pause';
+  if (snap.playing) phase = 'Enter pause';
+  else if (snap.error && nowPlaying && blockedFor === nowPlaying.id) phase = 'Blocked by YouTube';
+  else if (snap.error) phase = 'Starting';
   else if (snap.paused) phase = 'Paused · Enter play';
   else if (snap.ended) phase = 'Ended · Enter play';
   else if (needGesture) phase = 'Enter to play';
@@ -618,17 +770,37 @@ function updateChrome() {
       : '';
   }
   const title = nowPlaying && nowPlaying.title;
-  if (snap.error) {
+  if (snap.playing) {
     needGesture = false;
     setLoading(false);
     setPlayGate(false);
-    $('#player-error').textContent = snap.error;
-    $('#player-error').classList.remove('hidden');
-  } else if (snap.playing) {
-    needGesture = false;
-    setLoading(false);
-    setPlayGate(false);
+    $('#player-error').textContent = '';
+    $('#player-error').classList.add('hidden');
+    const bar = $('#errbar');
+    if (bar) {
+      bar.textContent = '';
+      bar.classList.add('hidden');
+    }
+    if (loadRetry) {
+      clearTimeout(loadRetry);
+      loadRetry = 0;
+    }
+    if (Player.lastStrategy) rememberWay(Player.lastStrategy());
     progressSave();
+  } else if (snap.error) {
+    needGesture = false;
+    const id = nowPlaying && nowPlaying.id;
+    const code = Player.lastCode ? Player.lastCode() : 0;
+    if (id && blockedFor === id) {
+      setLoading(false);
+      setPlayGate(false);
+      return;
+    }
+    if (id && tryNextWay(id, snap.error, code)) {
+      setLoading(true, title, 'Loading...');
+    } else if (id) {
+      skipUnplayable(snap.error, code);
+    }
   } else if (snap.paused || snap.ended) {
     needGesture = false;
     setPlayGate(true, title, snap.ended ? 'Ended · Enter to play' : 'Paused · Enter to play');
@@ -656,6 +828,7 @@ function openPlaylists() {
     label: p.name,
     sub: (p.videos || []).length + ' videos',
     onPick: () => {
+      skipIds = {};
       const vids = maybeShuffle(p.videos || []);
       queue = vids.map(v => Object.assign({}, v, { _listTitle: p.name }));
       if (!queue.length) return;
@@ -847,7 +1020,11 @@ function pollPair() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code: pairCode, ack: d.destSeq }),
         }).catch(() => {});
-        applyPush(dest);
+        // A push older than a few minutes is a leftover from before this page
+        // loaded. Ack it but never auto-play it, so a forgotten tab stays silent.
+        const stale = playable && !special && dest.ts &&
+          (Date.now() - Number(dest.ts) > PUSH_FRESH_MS);
+        if (!stale) applyPush(dest);
       }
     })
     .catch(e => {
@@ -880,6 +1057,21 @@ function renderDebug() {
   line('Now playing', nowPlaying ? nowPlaying.title : 'none');
   const errs = window.glasstubeErrors || [];
   line('JS errors', errs.length ? errs[errs.length - 1] : 'none', errs.length ? false : true);
+  line('Playback fails', playFails.length ? playFails[0] : 'none', playFails.length ? false : true);
+  if (playFails.length > 1) line('Earlier fail', playFails[1], false);
+  const dump = [
+    'ua=' + navigator.userAgent,
+    'pair=' + (pairCode || ''),
+    'now=' + ((nowPlaying && nowPlaying.id) || ''),
+    'lastError=' + ((typeof Player !== 'undefined' && Player.lastError) ? Player.lastError() : ''),
+    'lastCode=' + ((typeof Player !== 'undefined' && Player.lastCode) ? Player.lastCode() : ''),
+    'fails:',
+    playFails.length ? playFails.join('\n') : 'none',
+    'js:',
+    errs.length ? errs.join('\n') : 'none',
+  ].join('\n');
+  const logEl = $('#debug-log');
+  if (logEl) logEl.value = dump;
 }
 
 function handlePlayerKey(e) {
@@ -969,6 +1161,23 @@ $('#btn-pair-new').addEventListener('click', () => {
 $('#btn-debug-back').addEventListener('click', () => show('home'));
 $('#btn-settings-back').addEventListener('click', () => show('home'));
 $('#btn-retest').addEventListener('click', renderDebug);
+$('#btn-copy-debug').addEventListener('click', function () {
+  const t = ($('#debug-log') && $('#debug-log').value) || 'No errors yet.';
+  function ok() {
+    const hint = $('#debug-copy-msg');
+    if (hint) hint.textContent = 'Copied. Paste it in chat.';
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(ok).catch(function () {});
+    return;
+  }
+  const el = $('#debug-log');
+  if (el) {
+    el.focus();
+    el.select();
+    try { document.execCommand('copy'); ok(); } catch (e) {}
+  }
+});
 $('#btn-sound').addEventListener('click', () => {
   if (!sound) return;
   sound.setEnabled(!sound.enabled());

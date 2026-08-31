@@ -103,17 +103,18 @@ export async function enrichVideos(sess, videos) {
   const list = (videos || []).filter(v => v && v.id);
   if (!list.length) return videos || [];
   const d = await yt(sess, 'videos', {
-    part: 'contentDetails,statistics,snippet',
+    part: 'contentDetails,statistics,snippet,status',
     id: list.map(v => v.id).join(','),
   });
   const byId = {};
   (d.items || []).forEach(item => { if (item && item.id) byId[item.id] = item; });
   return list.map(v => {
     const full = byId[v.id];
-    if (!full) return v;
+    if (!full) return null;
     const liveState = String((full.snippet && full.snippet.liveBroadcastContent) || '');
     const live = liveState === 'live';
     const upcoming = liveState === 'upcoming';
+    const embeddable = !(full.status && full.status.embeddable === false);
     const duration = live ? 'LIVE' : (upcoming ? 'Soon' : parseIsoDuration(full.contentDetails && full.contentDetails.duration));
     const views = live || upcoming ? '' : fmtViews(full.statistics && full.statistics.viewCount);
     const when = fmtWhen(full.snippet && full.snippet.publishedAt);
@@ -128,9 +129,11 @@ export async function enrichVideos(sess, videos) {
       views: views || '',
       when: when || '',
       live: live,
+      upcoming: upcoming,
+      embeddable: embeddable,
       meta: bits.join(' · '),
     });
-  });
+  }).filter(v => v && v.id && v.embeddable !== false && !v.upcoming);
 }
 
 export async function playlistVideos(sess, playlistId, cap) {
@@ -138,5 +141,10 @@ export async function playlistVideos(sess, playlistId, cap) {
     part: 'snippet,contentDetails',
     playlistId,
   }, cap || 20);
-  return items.map(slimVideo).filter(Boolean);
+  const videos = items.map(slimVideo).filter(Boolean);
+  try {
+    return await enrichVideos(sess, videos);
+  } catch (e) {
+    return videos;
+  }
 }

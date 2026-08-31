@@ -1,5 +1,5 @@
 import { json } from './_rpc.js';
-import { parseYouTube, resolveHandle, channelFeed } from './_yt.js';
+import { parseYouTube, resolveHandle, channelFeed, keepPlayable } from './_yt.js';
 
 export default async function handler(req, res) {
   const q = req.query || {};
@@ -28,12 +28,13 @@ export default async function handler(req, res) {
     }
     const limit = Math.max(1, Math.min(Number(q.limit) || 6, 8));
     const feed = await channelFeed(id, limit);
+    const videos = await keepPlayable(feed.videos || []);
     return json(res, 200, {
       ok: true,
       id,
       name: String(feed.channel || parsed.handle || 'Channel').slice(0, 80),
       url: 'https://www.youtube.com/channel/' + id,
-      videos: feed.videos,
+      videos,
     });
   } catch (e) {
     return json(res, 200, { ok: false, error: String((e && e.message) || e) });

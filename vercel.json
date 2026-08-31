@@ -5,7 +5,7 @@
       "headers": [
         {
           "key": "Referrer-Policy",
-          "value": "strict-origin-when-cross-origin"
+          "value": "origin"
         }
       ]
     },
@@ -36,7 +36,16 @@
       ]
     },
     {
-      "source": "/api/(pair|push|feed|oembed|auth/.*|yt/.*)",
+      "source": "/api/(pair|push|feed|oembed|watch|auth/.*|yt/.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
+    },
+    {
+      "source": "/",
       "headers": [
         {
           "key": "Cache-Control",
@@ -49,7 +58,7 @@
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "no-cache"
+          "value": "no-store"
         }
       ]
     },
@@ -67,6 +76,10 @@
     {
       "source": "/phone",
       "destination": "/phone.html"
+    },
+    {
+      "source": "/api/diag",
+      "destination": "/api/watch"
     }
   ]
 }

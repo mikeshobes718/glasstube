@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="referrer" content="origin">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GlassTube player</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #p { width: 100vw; height: 100vh; border: 0; display: block; }
+</style>
+</head>
+<body>
+<script>
+(function () {
+  var q = new URLSearchParams(window.location.search);
+  var vid = String(q.get('v') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 11);
+  var autoplay = q.get('autoplay') === '1';
+  var start = Math.max(0, Math.floor(Number(q.get('start') || 0) || 0));
+  var origin = 'https://glasstube.vercel.app';
+  var host = q.get('host') === 'nocookie' ? 'www.youtube-nocookie.com' : 'www.youtube.com';
+  var params = new URLSearchParams({
+    enablejsapi: '1',
+    origin: origin,
+    widget_referrer: origin + '/',
+    autoplay: autoplay ? '1' : '0',
+    mute: '1',
+    controls: '0',
+    disablekb: '1',
+    fs: '0',
+    rel: '0',
+    playsinline: '1',
+    iv_load_policy: '3',
+    modestbranding: '1',
+  });
+  if (start > 0) params.set('start', String(start));
+  /* Written during parse so WebKit treats this as document HTML, not a JS iframe. */
+  document.write(
+    '<iframe id="p" width="600" height="338" allow="autoplay; encrypted-media; picture-in-picture" ' +
+    'referrerpolicy="origin" src="https://' + host + '/embed/' +
+    encodeURIComponent(vid) + '?' + params.toString() + '"></iframe>'
+  );
+})();
+</script>
+<script>
+(function () {
+  var yt = null;
+  var wantSound = false;
+  function send(msg) {
+    try { parent.postMessage(Object.assign({ glasstubeEmbed: 1 }, msg), window.location.origin); }
+    catch (e) { /* parent gone */ }
+  }
+  window.addEventListener('message', function (ev) {
+    if (ev.origin !== window.location.origin) return;
+    var d = ev.data || {};
+    if (!d.glasstubeCmd || !yt) return;
+    try {
+      if (d.cmd === 'play') yt.playVideo();
+      else if (d.cmd === 'pause') yt.pauseVideo();
+      else if (d.cmd === 'mute') { wantSound = false; yt.mute(); }
+      else if (d.cmd === 'unmute') { wantSound = true; yt.unMute(); }
+      else if (d.cmd === 'seekBy') yt.seekTo(Math.max(0, (yt.getCurrentTime() || 0) + Number(d.t || 0)), true);
+      else if (d.cmd === 'seekTo') yt.seekTo(Math.max(0, Number(d.t || 0)), true);
+      else if (d.cmd === 'rate') yt.setPlaybackRate(Number(d.r) || 1);
+      else if (d.cmd === 'captions') {
+        if (d.on) {
+          yt.loadModule('captions');
+          yt.setOption('captions', 'track', { languageCode: 'en' });
+        } else {
+          yt.unloadModule('captions');
+        }
+      }
+    } catch (e) { /* player not ready */ }
+  });
+  window.onYouTubeIframeAPIReady = function () {
+    yt = new YT.Player('p', {
+      events: {
+        onReady: function () { send({ type: 'ready' }); },
+        onStateChange: function (e) {
+          if (e.data === 1 && wantSound) {
+            try { yt.unMute(); } catch (er) { /* stays muted */ }
+          }
+          send({ type: 'state', state: e.data });
+        },
+        onError: function (e) { send({ type: 'error', code: e.data }); },
+      },
+    });
+    setInterval(function () {
+      if (!yt || !yt.getCurrentTime) return;
+      try {
+        send({
+          type: 'time',
+          t: yt.getCurrentTime() || 0,
+          d: yt.getDuration() || 0,
+          s: yt.getPlayerState ? yt.getPlayerState() : -1,
+        });
+      } catch (e) { /* not ready */ }
+    }, 400);
+  };
+})();
+</script>
+<script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>
