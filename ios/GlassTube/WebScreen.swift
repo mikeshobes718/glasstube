@@ -290,9 +290,7 @@ struct WebScreen: UIViewRepresentable {
                 let id = String(body?["id"] as? String ?? "")
                 let blob = Self.sessionBlob(body)
                 DispatchQueue.global(qos: .userInitiated).async {
-                    var payload: [String: Any] = ["videos": [["id": id]]]
-                    StreamResolver.attachStreams(&payload, session: blob)
-                    let url = (payload["videos"] as? [[String: Any]])?.first?["u"] as? String ?? ""
+                    let url = StreamResolver.url(for: id, session: blob) ?? ""
                     DispatchQueue.main.async {
                         self.emitJS("glasstubeStream", ["u": url, "id": id])
                     }
@@ -704,7 +702,7 @@ final class YouTubePage: NSObject, WKNavigationDelegate, WKUIDelegate {
             self.loadWatch(id)
             self.startHunt()
         }
-        _ = box.wait(seconds: 20)
+        _ = box.wait(seconds: 30)
         if box.value == nil {
             StreamResolver.log("silent unlock timeout id=\(id)")
         }
@@ -909,6 +907,61 @@ final class YouTubePage: NSObject, WKNavigationDelegate, WKUIDelegate {
         huntTimer = nil
     }
 
+    private static let pagePlayerJS = """
+    try {
+      var cfg = (window.ytcfg && window.ytcfg.data_) || {};
+      var key = cfg.INNERTUBE_API_KEY || '';
+      var ctx = cfg.INNERTUBE_CONTEXT || null;
+      if (!key || !ctx || !ctx.client) return 'noctx';
+      var headers = { 'content-type': 'application/json' };
+      var m = document.cookie.match(/SAPISID=([^;]+)/);
+      if (m && m[1]) {
+        var ts = Math.floor(Date.now() / 1000);
+        var origin = location.protocol + '//' + location.host;
+        var buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(ts + ' ' + m[1] + ' ' + origin));
+        var bytes = new Uint8Array(buf);
+        var hex = '';
+        for (var i = 0; i < bytes.length; i++) hex += ('0' + bytes[i].toString(16)).slice(-2);
+        headers.authorization = 'SAPISIDHASH ' + ts + '_' + hex;
+        headers['x-goog-authuser'] = '0';
+      }
+      var r = await (window.__gtFetch || fetch)(
+        '/youtubei/v1/player?key=' + encodeURIComponent(key) + '&prettyPrint=false',
+        {
+          method: 'POST',
+          headers: headers,
+          credentials: 'include',
+          body: JSON.stringify({
+            videoId: vid,
+            contentCheckOk: true,
+            racyCheckOk: true,
+            context: ctx,
+          }),
+        }
+      );
+      var j = await r.json();
+      var play = (j && j.playabilityStatus && j.playabilityStatus.status) || '';
+      var stream = (j && j.streamingData) || {};
+      var list = [].concat(stream.formats || [], stream.adaptiveFormats || []);
+      var best = '';
+      var bestH = -1;
+      for (var i = 0; i < list.length; i++) {
+        var f = list[i] || {};
+        var u = String(f.url || '');
+        if (u.indexOf('googlevideo.com') === -1) continue;
+        if (u.indexOf('videoplayback') === -1) continue;
+        if (!/[?&]itag=(18|22)(?:&|$)/.test(u)) continue;
+        if (u.length < 100) continue;
+        var h = Number(f.height || 0) || 0;
+        if (!best || h > bestH) { best = u; bestH = h; }
+      }
+      if (best) return best;
+      return 'none play=' + play + ' n=' + list.length;
+    } catch (e) {
+      return 'err ' + String(e && e.message ? e.message : e);
+    }
+    """
+
     private static let androidPlayerJS = """
     try {
       const r = await (window.__gtFetch || fetch)(
@@ -966,27 +1019,28 @@ final class YouTubePage: NSObject, WKNavigationDelegate, WKUIDelegate {
                 }
             }
         }
-        if playerTries < 3 {
+        if playerTries < 4 {
             playerTries += 1
+            let viaPage = playerTries <= 3
             let id = pendingId
             guard let web else { return }
             Task { @MainActor in
                 do {
                     let raw = try await web.callAsyncJavaScript(
-                        Self.androidPlayerJS,
+                        viaPage ? Self.pagePlayerJS : Self.androidPlayerJS,
                         arguments: ["vid": id],
                         in: nil,
                         contentWorld: .page
                     )
                     let href = String(raw as? String ?? "")
                     if StreamResolver.isPlayableFile(href) {
-                        StreamResolver.log("hunt ytapi itag=\(StreamResolver.itag(href)) pot=\(href.contains("pot=")) len=\(href.count)")
+                        StreamResolver.log("hunt \(viaPage ? "ytpage" : "ytapi") itag=\(StreamResolver.itag(href)) pot=\(href.contains("pot=")) len=\(href.count)")
                         self.completeUnlock(href)
-                    } else if self.playerTries >= 3 {
-                        StreamResolver.log("ytapi empty id=\(id)")
+                    } else if self.playerTries >= 4, !href.isEmpty {
+                        StreamResolver.log("player empty id=\(id) \(href.prefix(100))")
                     }
                 } catch {
-                    StreamResolver.log("ytapi fail \(error.localizedDescription)")
+                    StreamResolver.log("player fail \(error.localizedDescription)")
                 }
             }
         }
@@ -1216,82 +1270,15 @@ enum StreamResolver {
         }
         lock.unlock()
         let hasSess = blob.map { !$0.isEmpty } ?? false
-        if hasSess, let authed = authedURL(for: trimmed, session: blob) {
-            log("resolve \(trimmed) via=auth itag=\(itag(authed)) len=\(authed.count)")
-            note(["id": trimmed, "ok": true, "src": "resolve1", "len": authed.count])
-            return authed
-        }
-        if hasSess {
-            log("skip visible unlock, session present")
-        }
-        let found = fetch(id: trimmed, client: "ANDROID_SDKLESS")
+        let found = YouTubePage.shared.silentUnlock(id: trimmed)
+            ?? fetch(id: trimmed, client: "ANDROID_SDKLESS")
             ?? fetch(id: trimmed, client: "ANDROID")
             ?? fetch(id: trimmed, client: "IOS")
-            ?? YouTubePage.shared.silentUnlock(id: trimmed)
             ?? (hasSess ? nil : YouTubePage.shared.unlockAndWait(id: trimmed))
         let playable = isPlayableFile(found)
         log("resolve \(trimmed) ok=\(playable) sess=\(hasSess) itag=\(itag(found)) len=\(found?.count ?? 0)")
         note(["id": trimmed, "ok": playable, "len": found?.count ?? 0])
         guard playable, let found else { return nil }
-        return found
-    }
-
-    private static func authedURL(for id: String, session blob: String?) -> String? {
-        guard let blob, !blob.isEmpty else { return nil }
-        var comps = URLComponents(string: "https://glasstube.vercel.app/api/watch")
-        var items = [
-            URLQueryItem(name: "resolve", value: "1"),
-            URLQueryItem(name: "v", value: id),
-        ]
-        if blob.count < 1800 {
-            items.append(URLQueryItem(name: "s", value: blob))
-        }
-        comps?.queryItems = items
-        guard let endpoint = comps?.url else { return nil }
-        var req = URLRequest(url: endpoint)
-        req.setValue("Bearer \(blob)", forHTTPHeaderField: "Authorization")
-        let sem = DispatchSemaphore(value: 0)
-        var found: String?
-        var http = 0
-        var rotated: String?
-        var err = ""
-        session.dataTask(with: req) { data, resp, _ in
-            defer { sem.signal() }
-            let res = resp as? HTTPURLResponse
-            http = res?.statusCode ?? 0
-            let fresh = res?.value(forHTTPHeaderField: "X-GlassTube-Session") ?? ""
-            if !fresh.isEmpty { rotated = fresh }
-            guard let data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else { return }
-            if let notes = json["notes"] as? [Any] {
-                let joined = notes.map { String(describing: $0) }.joined(separator: " | ")
-                if !joined.isEmpty { err = joined }
-            }
-            if (json["ok"] as? Bool) == true, let url = json["url"] as? String, !url.isEmpty {
-                found = url
-            } else if err.isEmpty {
-                err = String(json["error"] as? String ?? "")
-            }
-        }.resume()
-        _ = sem.wait(timeout: .now() + 18)
-        if let rotated {
-            let fresh = rotated
-            DispatchQueue.main.async {
-                onSession?(fresh)
-            }
-        }
-        log("auth resolve http=\(http) ok=\(found != nil) err=\(err.prefix(160)) itag=\(itag(found)) len=\(found?.count ?? 0)")
-        note(["id": id, "kind": "resolve1", "ok": found != nil, "err": String(err.prefix(120)), "len": found?.count ?? 0])
-        guard let found else { return nil }
-        if isPlayableFile(found) {
-            let probe = MediaRelay.shared.publishResult(id: id, google: found)
-            if !probe.probeOk {
-                log("auth resolve probe fail, keeping url")
-            }
-        } else {
-            log("auth resolve non-progressive, keeping url")
-        }
         return found
     }
 
@@ -1346,25 +1333,31 @@ enum StreamResolver {
             let n = min(videos.count, 8)
             for i in 0..<n {
                 guard let id = videoId(from: videos[i]) else { continue }
+                videos[i]["id"] = id
                 if let existing = videos[i]["u"] as? String, isRelayFile(existing) {
-                    videos[i]["id"] = id
                     continue
                 }
-                if let existing = videos[i]["u"] as? String, isPlayableFile(existing) {
-                    videos[i]["id"] = id
-                    videos[i]["u"] = MediaRelay.shared.publish(id: id, google: existing) ?? existing
-                    continue
-                }
-                if let u = url(for: id, session: blob) {
-                    videos[i]["id"] = id
-                    videos[i]["u"] = MediaRelay.shared.publish(id: id, google: u) ?? u
+                var google = videos[i]["u"] as? String
+                if !isPlayableFile(google) { google = nil }
+                videos[i]["u"] = nil
+                if let found = google ?? url(for: id, session: blob) {
+                    let pub = MediaRelay.shared.publishResult(id: id, google: found)
+                    if pub.probeOk, let local = pub.local {
+                        videos[i]["u"] = local
+                    } else {
+                        log("relay skip \(id) probe=\(pub.probeOk) wifi=\(pub.local != nil)")
+                    }
                 }
             }
             payload["videos"] = videos
         } else if let raw = payload["url"] as? String, let id = videoId(from: raw) {
             if let u = url(for: id, session: blob) {
-                let local = MediaRelay.shared.publish(id: id, google: u) ?? u
-                payload["videos"] = [["id": id, "u": local, "url": raw] as [String: Any]]
+                let pub = MediaRelay.shared.publishResult(id: id, google: u)
+                if pub.probeOk, let local = pub.local {
+                    payload["videos"] = [["id": id, "u": local, "url": raw] as [String: Any]]
+                } else {
+                    log("relay skip \(id) probe=\(pub.probeOk) wifi=\(pub.local != nil)")
+                }
             }
         }
         log("attach done hasFile=\(payloadHasFile(payload)) urlLen=\(payloadUrlLen(payload))")

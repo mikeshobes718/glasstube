@@ -24,10 +24,6 @@ final class MediaRelay {
     private let ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1"
     private let sliceBytes = 262144
 
-    func publish(id: String, google: String) -> String? {
-        publishResult(id: id, google: google).local
-    }
-
     func publishResult(id: String, google: String) -> (local: String?, probeOk: Bool) {
         guard let dest = URL(string: google) else { return (nil, false) }
         start()
@@ -184,11 +180,12 @@ final class MediaRelay {
         let spec = trimmed.lowercased().hasPrefix("bytes=") ? String(trimmed.dropFirst(6)) : trimmed
         let parts = spec.split(separator: "-", maxSplits: 1).map { String($0) }
         let start = Int(parts.first ?? "0") ?? 0
+        let cap = start + sliceBytes * 4 - 1
         if parts.count < 2 || parts[1].isEmpty {
-            let end = total > 0 ? total - 1 : start + sliceBytes - 1
+            let end = total > 0 ? min(total - 1, cap) : cap
             return (start, max(start, end))
         }
-        let end = Int(parts[1]) ?? start
+        let end = min(Int(parts[1]) ?? start, cap)
         return (start, max(start, end))
     }
 
@@ -259,8 +256,21 @@ final class MediaRelay {
         <script>
         var v=document.getElementById('v');
         var fails=0;
+        var queue=(location.hash||'').replace(/^#/,'').split(',').filter(function(x){return /^[a-zA-Z0-9_-]{11}$/.test(x);});
+        var pos=queue.indexOf('\(safe)');
+        if (pos < 0) pos = 0;
         function back(){ location.replace('https://glasstube.vercel.app/'); }
-        v.addEventListener('ended', back);
+        v.addEventListener('playing', function(){ try { v.muted = false; } catch(e){} });
+        v.addEventListener('ended', function(){
+          if (pos + 1 < queue.length) {
+            pos++;
+            fails = 0;
+            v.src = '/s/' + queue[pos];
+            v.play().catch(function(){});
+            return;
+          }
+          back();
+        });
         v.addEventListener('error', function(){
           fails++;
           if (fails < 2) { v.load(); v.play().catch(function(){}); return; }
@@ -296,8 +306,7 @@ final class MediaRelay {
             var start = 0
             var end = 0
             if total <= 0 {
-                let probeRange = range ?? "bytes=0-1023"
-                guard let first = self.pull(id: id, dest: dest, range: probeRange),
+                guard let first = self.pull(id: id, dest: dest, range: "bytes=0-1023"),
                       first.status == 200 || first.status == 206
                 else {
                     StreamResolver.log("relay fetch \(id) fail range=\(range ?? "-")")
@@ -308,7 +317,7 @@ final class MediaRelay {
                 let parsed = self.parseRange(range, total: total)
                 start = parsed.0
                 end = parsed.1
-                if first.body.count >= (end - start + 1) || range == probeRange {
+                if start == 0, first.body.count >= end + 1 {
                     StreamResolver.log("relay fetch \(id) http=\(first.status) range=\(range ?? "-")")
                     var extra: [String: String] = [:]
                     if !first.contentRange.isEmpty { extra["Content-Range"] = first.contentRange }

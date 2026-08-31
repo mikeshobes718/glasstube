@@ -17,7 +17,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-		<string>1.23</string>
+	<string>1.24</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -30,7 +30,12 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-		<string>24</string>
+	<string>25</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>GlassTube sends the video from this phone to the glasses on your WiFi.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>

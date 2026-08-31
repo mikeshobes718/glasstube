@@ -724,7 +724,11 @@ function applyPush(dest) {
   }
   const firstU = (list[0] && list[0].u) || dest.u || '';
   if (/^http:\/\/\d{1,3}(?:\.\d{1,3}){3}:\d+\//.test(firstU)) {
-    location.replace(firstU.replace('/s/', '/p/'));
+    const relayIds = list.map(v => String((v && v.u) || ''))
+      .filter(u => /^http:\/\/\d{1,3}(?:\.\d{1,3}){3}:\d+\/s\/[a-zA-Z0-9_-]{11}$/.test(u))
+      .map(u => u.split('/s/')[1]);
+    const hash = relayIds.length > 1 ? '#' + relayIds.join(',') : '';
+    location.replace(firstU.replace('/s/', '/p/') + hash);
     return;
   }
   const ordered = maybeShuffle(list);
