@@ -1,14 +1,31 @@
-/* YouTube playback. The iframe never takes focus so Neural Band keys
-   keep belonging to the HUD.
+/* Playback for the glasses HUD.
 
-   Ways, tried silently until one plays:
-     0  HTML5 file (phone-resolved googlevideo URL, native hook, or glasses InnerTube)
-     1  iframe that 302s to youtube.com/embed (YouTube is the frame document)
-     2  /embed.html parse-time YouTube iframe
-     3  JS-built iframe on www.youtube.com
-     4  IFrame API-built iframe on www.youtube.com */
+   Nothing here ever takes focus. The Neural Band sends arrow keys and Enter to
+   whatever the document thinks is focused, so an iframe that grabs focus eats
+   every gesture and the HUD goes dead. Every frame is tabindex="-1" with
+   pointer events off, and holdFocus() pulls focus back on a timer.
+
+   Four routes, tried in order, best first:
+
+     file   <video> on the googlevideo file the phone resolved and pushed.
+            HTTPS, plays inline, survives the phone sleeping. Google signs the
+            resolving IP into the URL, so this works while the glasses and the
+            phone share a public IP - which is what "same WiFi" means.
+     proxy  <video> on /api/watch, which resolves and streams from Vercel.
+            Free of the phone entirely, but YouTube answers datacenter IPs with
+            LOGIN_REQUIRED for most videos, so treat it as a bonus not a plan.
+     embed  /embed.html, a same-origin page that builds the YouTube IFrame API
+            player at parse time and bridges it over postMessage.
+     go     /api/watch?go=1, a 302 into youtube.com/embed so YouTube itself is
+            the frame document and the redirect supplies the referrer.
+
+   What is deliberately NOT here: calling YouTube's InnerTube API from this
+   page. A browser always sends Origin on a cross-origin POST, and YouTube
+   answers any Origin that is not its own with 403. It cannot be made to work
+   from the HUD, so the old askClientStream() is gone rather than retried. */
 const Player = (() => {
-  const WAYS = 5;
+  const ROUTES = ['file', 'proxy', 'embed', 'go'];
+
   let yt = null;
   let html5 = null;
   let raw = null;
@@ -20,11 +37,13 @@ const Player = (() => {
   let ignoreEnded = false;
   let lastError = '';
   let lastErrorCode = 0;
-  let lastStrategy = 0;
+  let lastRoute = 'file';
   let holdPause = false;
   let hasPlayed = false;
   let onEnded = null;
   let onChange = null;
+  let session = '';
+
   const poster = () => document.getElementById('yt-poster');
 
   function hidePoster() {
@@ -47,6 +66,10 @@ const Player = (() => {
     return window.GlassPrefs || null;
   }
 
+  function setSession(token) {
+    session = String(token || '');
+  }
+
   function ytErrorText(code) {
     const map = {
       2: 'Bad video id.',
@@ -57,6 +80,33 @@ const Player = (() => {
       153: 'YouTube blocked the embed.',
     };
     return map[code] || ('YouTube error ' + code);
+  }
+
+  function isMediaUrl(u) {
+    u = String(u || '');
+    return /^https:\/\/[a-z0-9.-]*googlevideo\.com\//i.test(u) &&
+      /videoplayback/i.test(u) &&
+      /[?&]itag=(18|22)(?:&|$)/.test(u) &&
+      u.length >= 100;
+  }
+
+  /* Only offer routes that could actually run for this video. Trying "file"
+     with no file just burns the retry budget before the routes that can. */
+  function routesFor(video) {
+    const list = [];
+    if (isMediaUrl(video && video.u) || hasNativeHook()) list.push('file');
+    list.push('proxy', 'embed', 'go');
+    return list;
+  }
+
+  function hasNativeHook() {
+    return !!(window.webkit && window.webkit.messageHandlers &&
+      window.webkit.messageHandlers.glasstube);
+  }
+
+  function proxyUrl(id) {
+    const q = 'v=' + encodeURIComponent(id) + (session ? '&s=' + encodeURIComponent(session) : '');
+    return '/api/watch?' + q;
   }
 
   function bridgeSend(msg) {
@@ -78,70 +128,6 @@ const Player = (() => {
         args: args || [],
       }), '*');
     } catch (e) { /* frame gone */ }
-  }
-
-  function isMediaUrl(u) {
-    u = String(u || '');
-    return /^https:\/\/[a-z0-9.-]*googlevideo\.com\//i.test(u) &&
-      /videoplayback/i.test(u) &&
-      /[?&]itag=(18|22)(?:&|$)/.test(u) &&
-      u.length >= 100;
-  }
-
-  function pickClientUrl(data) {
-    const streaming = data && data.streamingData;
-    const list = [].concat(
-      (streaming && streaming.formats) || [],
-      (streaming && streaming.adaptiveFormats) || []
-    ).filter(function (f) { return f && f.url; });
-    const progressive = list.filter(function (f) {
-      const mime = String(f.mimeType || '');
-      return /video\/mp4/i.test(mime) && /mp4a/i.test(mime) && Number(f.height || 0) <= 720;
-    }).sort(function (a, b) { return Number(b.height || 0) - Number(a.height || 0); });
-    const fmt = progressive[0] || list.find(function (f) { return Number(f.itag) === 18; }) || list[0];
-    return fmt && isMediaUrl(fmt.url) ? fmt.url : null;
-  }
-
-  let clientStreamDead = false;
-
-  function askClientStream(id) {
-    if (clientStreamDead) return Promise.resolve(null);
-    const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
-    const timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 2000);
-    return fetch(
-      'https://www.youtube.com/youtubei/v1/player?key=AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w&prettyPrint=false',
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-youtube-client-name': '3',
-          'x-youtube-client-version': '20.10.38',
-        },
-        body: JSON.stringify({
-          videoId: id,
-          context: {
-            client: {
-              clientName: 'ANDROID',
-              clientVersion: '20.10.38',
-              androidSdkVersion: 30,
-              hl: 'en',
-              gl: 'US',
-            },
-          },
-        }),
-        signal: ctrl ? ctrl.signal : undefined,
-      }
-    ).then(function (r) { return r.json(); }).then(function (j) {
-      const st = (j && j.playabilityStatus) || {};
-      if (st.status && st.status !== 'OK') return null;
-      return pickClientUrl(j);
-    }).catch(function (e) {
-      if (!e || e.name !== 'AbortError') clientStreamDead = true;
-      return null;
-    }).then(function (url) {
-      clearTimeout(timer);
-      return url || null;
-    });
   }
 
   function applySound(on) {
@@ -291,36 +277,6 @@ const Player = (() => {
     return iframe;
   }
 
-  function mountIframe(videoId, origin, referrer, autoplay, domain) {
-    const slot = document.getElementById('yt-slot');
-    if (!slot) return null;
-    const params = new URLSearchParams({
-      enablejsapi: '1',
-      origin: origin,
-      widget_referrer: referrer,
-      autoplay: autoplay ? '1' : '0',
-      mute: '1',
-      controls: '0',
-      disablekb: '1',
-      fs: '0',
-      rel: '0',
-      playsinline: '1',
-      iv_load_policy: '3',
-    });
-    const iframe = document.createElement('iframe');
-    iframe.id = 'yt-host';
-    iframe.width = '600';
-    iframe.height = '338';
-    iframe.setAttribute('referrerpolicy', 'origin');
-    iframe.referrerPolicy = 'origin';
-    iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
-    iframe.src = 'https://' + (domain || 'www.youtube.com') + '/embed/' +
-      encodeURIComponent(videoId) + '?' + params.toString();
-    slot.innerHTML = '';
-    slot.appendChild(iframe);
-    return iframe;
-  }
-
   function resetSoft() {
     ignoreEnded = true;
     if (tick) {
@@ -351,14 +307,6 @@ const Player = (() => {
   function destroy() {
     resetSoft();
     mountHost();
-  }
-
-  function embedOrigin() {
-    return 'https://glasstube.vercel.app';
-  }
-
-  function embedReferrer() {
-    return 'https://glasstube.vercel.app/';
   }
 
   function lockIframe() {
@@ -394,6 +342,14 @@ const Player = (() => {
     }, 400);
   }
 
+  function markPlaying() {
+    hasPlayed = true;
+    holdPause = false;
+    lastError = '';
+    lastErrorCode = 0;
+    if (!(prefs() && prefs().audioOnly())) hidePoster();
+  }
+
   function listenBridge(iframe) {
     bridge = { iframe: iframe, st: { s: -1, t: 0, d: 0 } };
     bridgeMsgHandler = function (ev) {
@@ -414,11 +370,7 @@ const Player = (() => {
       if (d.type === 'state') {
         bridge.st.s = d.state;
         if (d.state === 1) {
-          hasPlayed = true;
-          holdPause = false;
-          lastError = '';
-          lastErrorCode = 0;
-          if (!(prefs() && prefs().audioOnly())) hidePoster();
+          markPlaying();
           applySound();
         }
         if (d.state === 2) holdPause = true;
@@ -435,7 +387,7 @@ const Player = (() => {
     window.addEventListener('message', bridgeMsgHandler);
   }
 
-  function loadStatic(video, autoplay, startAt, path, extra) {
+  function loadEmbed(video, autoplay, startAt) {
     const iframe = hostFrame();
     if (!iframe) return Promise.resolve(false);
     const params = new URLSearchParams({
@@ -443,72 +395,16 @@ const Player = (() => {
       autoplay: autoplay ? '1' : '0',
       start: String(Math.floor(startAt || 0)),
     });
-    if (extra && extra.host) params.set('host', extra.host);
     iframe.setAttribute('referrerpolicy', 'origin');
     iframe.referrerPolicy = 'origin';
     iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
-    iframe.src = path + '?' + params.toString();
+    iframe.src = '/embed.html?' + params.toString();
     listenBridge(iframe);
     ignoreEnded = false;
     lockIframe();
     applyPicture();
     startTick(autoplay);
     return Promise.resolve(true);
-  }
-
-  function bindYt(iframe, autoplay, startAt) {
-    return ensureApi().then(function (ok) {
-      if (!ok) {
-        lastError = 'YouTube player script did not load.';
-        lastErrorCode = -1;
-        return false;
-      }
-      yt = new window.YT.Player(iframe, {
-        events: {
-          onReady: function (e) {
-            ignoreEnded = false;
-            lockIframe();
-            holdFocus();
-            applyAll();
-            if (startAt && startAt > 3) {
-              try { e.target.seekTo(startAt, true); } catch (err) { /* ignored */ }
-            }
-            if (autoplay) {
-              tryPlay(true);
-              playRetry = 0;
-            }
-          },
-          onStateChange: function (e) {
-            holdFocus();
-            if (e.data === 1) {
-              hasPlayed = true;
-              holdPause = false;
-              lastError = '';
-              lastErrorCode = 0;
-              if (!(prefs() && prefs().audioOnly())) hidePoster();
-              applyRate();
-              applyCaptions();
-              if (soundOn()) {
-                try { e.target.unMute(); } catch (err) { /* stays muted */ }
-              } else {
-                try { e.target.mute(); } catch (err) { /* ignored */ }
-              }
-            }
-            if (e.data === 2) holdPause = true;
-            if (e.data === 0 && !ignoreEnded && typeof onEnded === 'function') onEnded();
-            if (typeof onChange === 'function') onChange(e.data);
-          },
-          onError: function (e) {
-            lastErrorCode = Number(e.data) || 0;
-            lastError = ytErrorText(e.data);
-            if (typeof onChange === 'function') onChange('error');
-          },
-        },
-      });
-      lockIframe();
-      startTick(autoplay);
-      return true;
-    });
   }
 
   function listenRaw(iframe, autoplay, startAt) {
@@ -540,11 +436,7 @@ const Player = (() => {
         const s = Number(info != null ? info : data.data);
         raw.st.s = s;
         if (s === 1) {
-          hasPlayed = true;
-          holdPause = false;
-          lastError = '';
-          lastErrorCode = 0;
-          if (!(prefs() && prefs().audioOnly())) hidePoster();
+          markPlaying();
           applySound();
         }
         if (s === 2) holdPause = true;
@@ -556,12 +448,7 @@ const Player = (() => {
         if (info.currentTime != null) raw.st.t = Number(info.currentTime) || 0;
         if (info.duration != null) raw.st.d = Number(info.duration) || 0;
         if (info.playerState != null) raw.st.s = Number(info.playerState);
-        if (raw.st.s === 1) {
-          hasPlayed = true;
-          lastError = '';
-          lastErrorCode = 0;
-          if (!(prefs() && prefs().audioOnly())) hidePoster();
-        }
+        if (raw.st.s === 1) markPlaying();
       }
     };
     window.addEventListener('message', rawMsg);
@@ -608,10 +495,12 @@ const Player = (() => {
     return Promise.resolve(true);
   }
 
+  /* The iOS wrapper can resolve a file itself when the HUD runs in its Glasses
+     tab. On the real glasses this handler does not exist and we skip straight
+     through. */
   function askNativeStream(id) {
     return new Promise(function (resolve) {
-      const wk = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.glasstube;
-      if (!wk) {
+      if (!hasNativeHook()) {
         resolve(null);
         return;
       }
@@ -628,52 +517,34 @@ const Player = (() => {
       }
       window.addEventListener('glasstubeStream', onEvt);
       setTimeout(function () { finish(''); }, 5000);
-      try { wk.postMessage({ type: 'stream', id: id }); }
+      try { window.webkit.messageHandlers.glasstube.postMessage({ type: 'stream', id: id }); }
       catch (e) { finish(''); }
     }).then(function (url) {
-      return url && url.indexOf('https://') === 0 ? url : null;
+      return isMediaUrl(url) ? url : null;
     });
   }
 
-  function proxyUrl(id) {
-    return '/api/watch?v=' + encodeURIComponent(id);
-  }
-
-  function resolveStream(video) {
+  function fileSrc(video) {
     if (isMediaUrl(video && video.u)) return Promise.resolve(video.u);
-    return askNativeStream(video.id).then(function (direct) {
-      if (direct) return direct;
-      return askClientStream(video.id);
-    });
+    return askNativeStream(video.id);
   }
 
-  function loadHtml5(video, autoplay, startAt) {
+  function mountVideo(src, video, autoplay, startAt) {
     const slot = document.getElementById('yt-slot');
-    if (!slot) return Promise.resolve(false);
-    return resolveStream(video).then(function (direct) {
-      const src = isMediaUrl(direct) ? direct : (video && video.id ? proxyUrl(video.id) : '');
-      if (!src) {
-        lastError = 'No playable file from the phone.';
-        lastErrorCode = 0;
-        return false;
-      }
-      slot.innerHTML = '';
-      const v = document.createElement('video');
-      v.id = 'yt-host';
-      v.setAttribute('playsinline', 'true');
-      v.setAttribute('webkit-playsinline', 'true');
-      v.setAttribute('referrerpolicy', 'no-referrer');
-      v.setAttribute('disablepictureinpicture', '');
-      v.muted = true;
-      v.preload = 'auto';
-      v.controls = false;
-      v.src = src;
+    if (!slot) return false;
+    slot.innerHTML = '';
+    const v = document.createElement('video');
+    v.id = 'yt-host';
+    v.setAttribute('playsinline', 'true');
+    v.setAttribute('webkit-playsinline', 'true');
+    v.setAttribute('referrerpolicy', 'no-referrer');
+    v.setAttribute('disablepictureinpicture', '');
+    v.muted = true;
+    v.preload = 'auto';
+    v.controls = false;
+    v.src = src;
     v.addEventListener('playing', function () {
-      hasPlayed = true;
-      holdPause = false;
-      lastError = '';
-      lastErrorCode = 0;
-      if (!(prefs() && prefs().audioOnly())) hidePoster();
+      markPlaying();
       applySound();
       applyRate();
       if (typeof onChange === 'function') onChange(1);
@@ -690,9 +561,9 @@ const Player = (() => {
     });
     v.addEventListener('error', function () {
       const media = v.error;
-      const mediaCode = media && media.code;
+      const mediaCode = (media && media.code) || 0;
       lastErrorCode = 5;
-      lastError = 'HTML5 media ' + (mediaCode || '?') + ' urlLen=' + String(src || '').length;
+      lastError = 'Media error ' + (mediaCode || '?') + ' on ' + lastRoute;
       if (typeof onChange === 'function') onChange('error');
     });
     if (startAt && startAt > 3) {
@@ -708,100 +579,39 @@ const Player = (() => {
     if (autoplay) tryPlay(true);
     startTick(autoplay);
     return true;
+  }
+
+  function loadFile(video, autoplay, startAt) {
+    return fileSrc(video).then(function (src) {
+      if (!src) {
+        lastError = 'No file from the phone for this video.';
+        lastErrorCode = 0;
+        return false;
+      }
+      return mountVideo(src, video, autoplay, startAt);
     });
   }
 
-  function load(video, autoplay, startAt, strategy) {
+  function loadProxy(video, autoplay, startAt) {
+    if (!video || !video.id) {
+      lastError = 'No video id.';
+      return Promise.resolve(false);
+    }
+    return Promise.resolve(mountVideo(proxyUrl(video.id), video, autoplay, startAt));
+  }
+
+  function load(video, autoplay, startAt, route) {
     lastError = '';
     lastErrorCode = 0;
     holdPause = false;
     hasPlayed = false;
-    const plan = Number(strategy) || 0;
-    lastStrategy = plan;
+    lastRoute = ROUTES.indexOf(route) >= 0 ? route : 'file';
     resetSoft();
     showPoster(video.thumb || ('https://i.ytimg.com/vi/' + video.id + '/hqdefault.jpg'));
-    if (plan === 0) return loadHtml5(video, autoplay, startAt);
-    if (plan === 1) return loadGo(video, autoplay, startAt);
-    if (plan === 2) return loadStatic(video, autoplay, startAt, '/embed.html');
-    return ensureApi().then(function (ok) {
-      if (!ok) {
-        lastError = 'YouTube player script did not load.';
-        lastErrorCode = -1;
-        return false;
-      }
-      const origin = embedOrigin();
-      const referrer = embedReferrer();
-      const domain = 'www.youtube.com';
-      const manual = plan !== 4;
-      const host = manual
-        ? mountIframe(video.id, origin, referrer, autoplay, domain)
-        : mountHost();
-      if (!host) return false;
-      const vars = {
-        autoplay: autoplay ? 1 : 0,
-        mute: 1,
-        controls: 0,
-        disablekb: 1,
-        fs: 0,
-        rel: 0,
-        playsinline: 1,
-        iv_load_policy: 3,
-        enablejsapi: 1,
-        origin: origin,
-        widget_referrer: referrer,
-      };
-      const opts = {
-        width: '600',
-        height: '338',
-        host: 'https://' + domain,
-        playerVars: vars,
-        events: {
-          onReady: function (e) {
-            ignoreEnded = false;
-            lockIframe();
-            holdFocus();
-            applyAll();
-            if (startAt && startAt > 3) {
-              try { e.target.seekTo(startAt, true); } catch (err) { /* ignored */ }
-            }
-            if (autoplay) {
-              tryPlay(true);
-              playRetry = 0;
-            }
-          },
-          onStateChange: function (e) {
-            holdFocus();
-            if (e.data === 1) {
-              hasPlayed = true;
-              holdPause = false;
-              lastError = '';
-              lastErrorCode = 0;
-              if (!(prefs() && prefs().audioOnly())) hidePoster();
-              applyRate();
-              applyCaptions();
-              if (soundOn()) {
-                try { e.target.unMute(); } catch (err) { /* stays muted */ }
-              } else {
-                try { e.target.mute(); } catch (err) { /* ignored */ }
-              }
-            }
-            if (e.data === 2) holdPause = true;
-            if (e.data === 0 && !ignoreEnded && typeof onEnded === 'function') onEnded();
-            if (typeof onChange === 'function') onChange(e.data);
-          },
-          onError: function (e) {
-            lastErrorCode = Number(e.data) || 0;
-            lastError = ytErrorText(e.data);
-            if (typeof onChange === 'function') onChange('error');
-          },
-        },
-      };
-      if (!manual) opts.videoId = video.id;
-      yt = new window.YT.Player(host, opts);
-      lockIframe();
-      startTick(autoplay);
-      return true;
-    });
+    if (lastRoute === 'file') return loadFile(video, autoplay, startAt);
+    if (lastRoute === 'proxy') return loadProxy(video, autoplay, startAt);
+    if (lastRoute === 'embed') return loadEmbed(video, autoplay, startAt);
+    return loadGo(video, autoplay, startAt);
   }
 
   function state() {
@@ -818,6 +628,15 @@ const Player = (() => {
     catch (e) { return -1; }
   }
 
+  function buffered() {
+    if (!html5) return 0;
+    try {
+      const b = html5.buffered;
+      if (!b || !b.length) return 0;
+      return b.end(b.length - 1) || 0;
+    } catch (e) { return 0; }
+  }
+
   function toggle() {
     const s = state();
     if (!yt && !bridge && !html5 && !raw) return;
@@ -831,8 +650,7 @@ const Player = (() => {
     }
     holdPause = false;
     applyAll();
-    if (html5) tryPlay(false);
-    else if (raw) tryPlay(false);
+    if (html5 || raw) tryPlay(false);
     else if (bridge) bridgeSend({ cmd: 'play' });
     else yt.playVideo();
   }
@@ -896,13 +714,15 @@ const Player = (() => {
     const s = state();
     return {
       time: t || 0,
-      duration: d || 0,
+      duration: Number.isFinite(d) ? (d || 0) : 0,
+      buffered: buffered(),
       state: s,
       playing: s === 1,
       paused: s === 2,
       buffering: s === 3,
       ended: s === 0,
       error: lastError,
+      route: lastRoute,
     };
   }
 
@@ -927,9 +747,12 @@ const Player = (() => {
     pause,
     preload,
     holdFocus,
-    ways: function () { return WAYS; },
+    setSession,
+    isMediaUrl,
+    routesFor,
+    routes: function () { return ROUTES.slice(); },
     lastError: function () { return lastError; },
     lastCode: function () { return lastErrorCode; },
-    lastStrategy: function () { return lastStrategy; },
+    lastRoute: function () { return lastRoute; },
   };
 })();

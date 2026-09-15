@@ -6,16 +6,16 @@
 <meta name="mrbd-web-app-capable" content="yes">
 <meta name="viewport" content="width=600, height=600, initial-scale=1.0, user-scalable=no">
 <title>GlassTube</title>
-<link rel="icon" type="image/png" href="/icon-192.png?v=2">
+<link rel="icon" type="image/png" href="/icon-192.png?v=3">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="apple-touch-icon" type="image/png" href="/apple-touch-icon.png?v=2" sizes="180x180">
-<link rel="preload" href="/icon-192.png?v=2" as="image">
+<link rel="apple-touch-icon" type="image/png" href="/apple-touch-icon.png?v=3" sizes="180x180">
+<link rel="preload" href="/icon-192.png?v=3" as="image">
 <meta name="theme-color" content="#000000">
 <meta name="referrer" content="origin">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=15">
+<link rel="stylesheet" href="/styles.css?v=17">
 <script>
 (function () {
   function onPhone() {
@@ -60,6 +60,7 @@
 })();
 </script>
 <script>
+window.GLASSTUBE_BUILD = '1.25';
 window.glasstubeErrors = [];
 window.glasstubeNoise = function (text, src) {
   var t = String(text || '');
@@ -109,7 +110,10 @@ window.addEventListener('unhandledrejection', function (e) {
   </header>
   <div class="list list-home screen-body">
     <button class="focusable menu-btn hidden" id="btn-continue" data-menu="continue">Continue<small id="continue-sub"></small></button>
+    <button class="focusable menu-btn hidden" data-menu="queue">Queue<small></small></button>
+    <button class="focusable menu-btn" data-menu="search">Search<small>Type with the band, play here</small></button>
     <button class="focusable menu-btn" data-menu="phone">From iPhone<small>Paste a YouTube link, it plays here</small></button>
+    <button class="focusable menu-btn hidden" data-menu="library">Library<small>Subscriptions, playlists, liked</small></button>
     <button class="focusable menu-btn" data-menu="recents">Recents</button>
     <button class="focusable menu-btn" data-menu="channels">Channels<small>Your list from the phone</small></button>
     <button class="focusable menu-btn" data-menu="playlists">Playlists<small>Lists you sent from the iPhone</small></button>
@@ -128,7 +132,7 @@ window.addEventListener('unhandledrejection', function (e) {
   <div id="yt-wrap">
     <div id="yt-slot"><iframe id="yt-host" src="about:blank" referrerpolicy="origin" allow="autoplay; encrypted-media; picture-in-picture" tabindex="-1"></iframe></div>
     <img id="yt-poster" alt="">
-    <div id="player-bar"><div id="player-fill"></div></div>
+    <div id="player-bar"><div id="player-buffer"></div><div id="player-fill"></div></div>
     <div id="player-time">0:00 / 0:00</div>
     <div id="load-gate" class="load-gate">
       <div class="load-spin"></div>
@@ -146,6 +150,19 @@ window.addEventListener('unhandledrejection', function (e) {
     <div id="player-next"></div>
     <div id="player-hint">Enter play · Up last · Down next · Left back · Right +10s</div>
     <div id="player-error" class="hidden"></div>
+    <div id="player-relay" class="hidden relay-offer">
+      <button class="focusable back-btn" id="btn-relay">Play from the phone instead<span class="back-hint">leaves the HUD</span></button>
+    </div>
+  </div>
+</section>
+
+<section id="screen-search" class="screen hidden">
+  <h2 class="title">Search</h2>
+  <div id="kb-text" class="kb-text kb-empty">Type a search</div>
+  <div id="kb-recent" class="kb-recent hidden"></div>
+  <div id="kb-grid" class="kb-grid"></div>
+  <div class="list back-row">
+    <button class="focusable back-btn" id="btn-search-back">Back <span class="back-hint">swipe left</span></button>
   </div>
 </section>
 
@@ -198,8 +215,8 @@ window.addEventListener('unhandledrejection', function (e) {
 
 <script src="/sound.js?v=7"></script>
 <script src="/prefs.js?v=7"></script>
-<script src="/player.js?v=23"></script>
-<script src="/app.js?v=30"></script>
+<script src="/player.js?v=25"></script>
+<script src="/app.js?v=35"></script>
 </div>
 </body>
 </html>

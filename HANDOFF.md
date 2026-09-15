@@ -11,7 +11,7 @@ Standing orders (do this every session):
 6. Commit with a message like `handoff: ...` then `git push` the GitLab remote only. Never push origin/GitHub.
 7. No secrets, no PATs, no `.env` contents in this file.
 8. After you push, stop. Mac Cursor will pull and read `## To Mac`.
-9. Start the next session the same way: pull, read, work, write, push.
+9. Start the next session the same way: pull, read, work, push.
 10. Remote: `gitlab` = `https://gitlab.com/mikeshobes718/glasstube.git`
 
 ## Rules
@@ -27,47 +27,133 @@ Standing orders (do this every session):
 
 ## To other
 
-Job from Mike (2026-08-31): DONE, see below.
+Job from Mike (2026-09-14): DONE by the Mac side. Read this before you touch the
+play path again. Two of the standing instructions in the old 2026-08-31 entry
+are now known to be wrong, so that entry is superseded.
 
-Get itag 18/22 on the phone. Use MediaRelay. Push `u` so the glasses play. Do not use the YouTube embed (error 150). Do not show the unlock overlay if an account session already exists. If you change Swift, bump iOS to 1.24 / build 25 (now 1.23 / 24). When done, `git push` GitLab only (`git push gitlab HEAD:main`), then write status under `## To Mac` and a Log line so Mac Cursor can tell Mike.
+Facts, all measured on 2026-09-14, none guessed:
 
-Result summary for the other computer's Cursor (written by the Linux Cursor, 2026-08-31):
-
-Current state: commit `f0e1950` on GitLab main, iOS app version 1.24 (build 25).
+- YouTube answers **Vercel's IPs** with `LOGIN_REQUIRED` ("Sign in to confirm
+  you're not a bot") for nearly every video. Measured across ANDROID,
+  ANDROID_SDKLESS, ANDROID_VR and IOS, with and without a real `visitorData`
+  lifted from a live page load. Server-side resolve is a bonus route, never the
+  plan.
+- YouTube answers InnerTube with **403** whenever the request carries a
+  non-YouTube `Origin` header. A browser always sends one on a cross-origin
+  POST, so the HUD can never call InnerTube itself. `askClientStream()` was
+  deleted rather than left in to fail. Do not re-add it.
+- The file URL carries `ip` inside its signed `sparams`, so it is bound to the
+  public IP that resolved it. That is exactly why pushing it to the glasses
+  works: on the same WiFi they share the phone's public IP. The old entry read
+  this as a reason to avoid the raw URL; it is the reason to use it.
+- The **YouTube embed does play** - verified end to end in Chromium against
+  production. Whether the Meta WebView still throws error 150 is unknown, so
+  the embed is now the third route rather than a banned one.
 
 What changed:
-- Hunt-first resolve in `ios/GlassTube/WebScreen.swift`: the phone loads a hidden WKWebView on the YouTube watch page first, then falls back to guest InnerTube (ANDROID_SDKLESS / ANDROID / IOS), then the visible unlock screen only when no account session blob exists. The dead Vercel `/api/watch?resolve=1` call was removed (server IPs get LOGIN_REQUIRED, proven).
-- The hunt includes an in-page `/youtubei/v1/player` call using the watch page's own ytcfg key/context, cookies (`credentials: 'include'`), and a SAPISIDHASH header when a SAPISID cookie exists. That is InnerTube with a real watch-page session, the realistic path to itag 18/22.
-- MediaRelay probe gate in `ios/GlassTube/MediaRelay.swift`: the relay URL goes on the push payload as `u` only after a real byte probe returns 200/206 from the phone. No WiFi IP or failed probe means no `u` (no raw googlevideo fallback; those URLs are IP-bound to the phone). Open-ended range requests (`bytes=0-`, what the glasses WebView sends) are capped at 1 MB per response. The `/p/ID` play page unmutes after playback starts and chains pushed playlists via ids in the URL hash.
-- HUD side in `app.js`: on a relay push the glasses leave the HUD to the phone's play page. No youtube.com/embed anywhere in the play path (embeds error 150 in the Meta WebView).
-- iOS bumped to 1.24 (25) in Info.plist, project.yml, and project.pbxproj. Added NSAllowsLocalNetworking so ATS does not block the in-app Glasses tab from loading the http relay URL.
 
-Verified statically (no iPhone or glasses on the Linux host): full send path review (StreamResolver hunt -> MediaRelay probe -> `u` = `http://PHONE_IP:8787/s/ID` -> /api/push keeps relay `u` -> HUD applyPush location.replace to /p/ID), `node --check` on all JS including the Swift-embedded snippets, Swift delimiter balance, version visible under the GlassTube title in RootView.
-
-NOT verified: whether the hunt actually returns itag 18/22 on Mike's network (if the URLs need a poToken the probe gate drops them honestly and the phone says the file was blocked), and Meta WebView autoplay behavior of the relay page.
-
-Test steps for Mike: swipe-kill GlassTube, reopen, confirm 1.24 under the GlassTube title. Phone and glasses on the same WiFi. Stay signed in on the account card. Send a normal video. The glasses should leave the HUD and play the file from the phone, with sound, no error 150. If it fails, copy the Errors box on the Phone tab and paste it here.
-
-To the other computer's Cursor: please `git pull` GitLab main, run the test above with Mike, and write your findings under `## To Mac` plus a Log line.
-
-Mac 2026-08-31: pulled gitlab `2ab0d1b` (includes `f0e1950`). Deployed https://glasstube.vercel.app (`app.js`). Built iOS 1.24 (25). Not on the phone yet: wireless developer tunnel is down (device paired, last CoreDevice session Aug 30 4:05pm). Unlock the iPhone or plug USB so Mac can install.
+- HUD route chain is `file > proxy > embed > go`, named not numbered, and
+  whichever route worked last is tried first next time (`glasstube.route`).
+  `file` is skipped when there is no file, so no attempt is wasted.
+- The HUD **no longer `location.replace`s to the phone's relay**. That threw
+  away the queue, the settings and every Neural Band binding. The relay is
+  plain HTTP against an HTTPS HUD, so it can never be an inline `<video>`; it
+  is now a button on the error screen and nothing else.
+- iOS `attachStreams` sends **both**: `u` is the googlevideo file (HTTPS, plays
+  inside the HUD, survives the phone sleeping), `r` is the LAN relay. The old
+  build sent only `r`, and dropped `u` entirely whenever the relay probe
+  failed.
+- Root cause of "nothing plays at all": the phone was still on **1.23 (24)**.
+  1.24 was built but never installed, so the HUD sat waiting for a payload the
+  phone had no code to send. Now **1.25 (26)**, installed.
+- New on the glasses: D-pad letter-grid search with no sign-in (`/api/search`
+  reads `ytInitialData`, and that endpoint does answer Vercel's IPs), library
+  browse once the phone sends its session, per-video resume marks, next-video
+  prefetch, scrolling lists, a buffered-ahead bar, and Diagnostics with a live
+  self-test.
+- Pairing is no longer the six character code alone. A successful pair mints a
+  **link token** (64 hex, `glasstube_pairs.link_token`); `poll`, `push`, `touch`
+  and `ack` all accept a code *or* a token under the same `p_code` argument, and
+  a paired row now lives **365 days past last activity** instead of 24 hours.
+  The code keeps its 24h window because it is guessable and on-screen. Both
+  clients store the token and send it as `code`. Migration:
+  `glasstube_durable_pair_link`.
+- Every push carries the iPhone build as `app`. The HUD compares it against
+  `MIN_PHONE_APP` in `app.js` and says "update the iPhone app" rather than
+  blaming YouTube. **Raise `MIN_PHONE_APP` whenever you change the push payload
+  shape** - that is the guard against repeating the September outage.
+- `node scripts/selftest.mjs` runs the whole chain against production, browser
+  included. Run it before and after anything in the play path. It needs
+  `npm i playwright-core` for the browser half and skips it cleanly otherwise.
+- Hobby plan caps at **12 serverless functions**. `/api/search` is a rewrite
+  onto `api/feed.js` for that reason alone. Count before adding an endpoint.
 
 ## To Mac
 
-2026-08-31 other Cursor: done, pushed to GitLab main.
+2026-09-14 Mac: play path rebuilt, deployed to production, iOS 1.25 (26) built
+and installed on Mike's iPhone over the wireless pairing.
 
-What changed:
-- Phone resolve order is now: hidden WKWebView watch-page hunt FIRST, then guest InnerTube (ANDROID_SDKLESS / ANDROID / IOS) as fallback, then the visible unlock screen only when no account session exists. The dead Vercel `/api/watch?resolve=1` call is gone (server IPs get LOGIN_REQUIRED, proven).
-- The hunt now also calls `/youtubei/v1/player` from INSIDE the loaded watch page, using the page's own ytcfg key/context, cookies, and a SAPISIDHASH header when a SAPISID cookie exists. That is InnerTube with a real watch-page session, the path that can return itag 18/22.
-- MediaRelay probe is now a gate: the relay URL goes on the push as `u` only when the phone actually fetched bytes (200/206). No WiFi IP or failed probe means no `u`, and the phone tells the user to stay on WiFi instead of the glasses erroring on a dead link.
-- Relay fixes: open-ended range requests (what the Chromium-based glasses WebView sends, `bytes=0-`) no longer slurp the whole file before answering (capped at 1 MB per response), and the size probe is always bounded.
-- Phone play page (`/p/ID`) now unmutes after playback starts and plays the whole pushed list (glasses pass the ids in the URL hash).
-- Unlock overlay logic unchanged: still never shows when the account card session blob exists.
-- iOS bumped to 1.24 (25). Added NSAllowsLocalNetworking so the in-app Glasses tab can load the http relay URL too (ATS would block it otherwise).
+Verified on production in a real browser:
 
-Not verified (no iPhone or glasses on this host): that the watch-page hunt actually returns itag 18/22 for a normal video on Mike's network, and that the Meta WebView autoplays the relay page. Verified statically: full send path review (StreamResolver -> MediaRelay probe -> /api/push keeps relay `u` -> HUD applyPush location.replace to /p/), node --check on changed JS and on the JS embedded in the Swift strings, version bump shows under the GlassTube title.
+- `file` route plays a phone-resolved googlevideo URL end to end inside the HUD
+  (two videos, correct durations, buffered bar advancing).
+- With no file at all, the chain falls through `proxy` (fails in about 2s) to
+  `embed`, which plays in about 4s.
+- `/api/search?q=` returns 20 results with durations and view counts.
+- push -> poll round trip carries both `u` (1101 chars) and `r`.
+- Every screen renders and navigates with arrows and Enter only; Back is
+  reachable from the search grid without the glasses' own back gesture.
 
-Test for Mike: swipe-kill GlassTube, open it, confirm 1.24 under the title. Phone and glasses on the same WiFi. Already signed in on the account card. Send a normal video. Glasses should leave the HUD and play the file from the phone, no error 150. If it fails, copy the Errors box on the Phone tab and paste it here.
+Not verified, needs Mike wearing the glasses:
+
+- Whether the Meta WebView plays the googlevideo `<video>`. This is the one
+  that matters; everything else is a fallback.
+- Whether the WebView still throws error 150 on the embed route.
+- Whether the glasses really do share the phone's public IP on his WiFi.
+
+If it still fails: Diagnostics on the glasses, Run self-test, Copy errors. The
+readout now names the page origin, the route chain, whether the phone sent a
+file, and whether the server can resolve anything today.
+
+### Follow-up, same day
+
+Mike confirmed video plays again on the glasses. Two things came out of it:
+
+- He had to retype the pair code on every app launch. Cause: pair rows expired
+  24h after last touch, and the phone's `connect()` on boot just showed an
+  error when the touch failed. Fixed with the link token above; verified in a
+  browser that the phone reconnects on its own after a restart, and after the
+  six character code is deleted outright.
+- "Make sure this never breaks again" -> the self test script, the version
+  stamp guard, and route memory that can no longer demote the phone file route
+  behind a fallback it happened to use last night.
+
+### Native rewrite, 2026-09-14
+
+The iPhone app is now SwiftUI, version **2.0 (28)**. `phone.html` is no longer
+what the app shows; it stays deployed as the browser fallback only.
+
+- New files: `Models.swift`, `Store.swift`, `API.swift`, `GoogleAuth.swift`,
+  `Components.swift`, `SendView.swift`, `PairView.swift`, `SearchView.swift`,
+  `LibraryView.swift`, `ListsView.swift`, `AccountView.swift`,
+  `GlassesView.swift`. `RootView.swift` is a four-tab `TabView`.
+- `WebScreen.swift` is untouched apart from the version stamp and the u/r
+  split. It still owns `YouTubePage`, `StreamResolver` and the unlock screen,
+  and native code now calls `StreamResolver.attachStreams` / `postPush`
+  directly instead of going through the JS message bridge. **Do not move the
+  resolver**: it has to run in native code on the phone's own IP.
+- The Google session moved from web `localStorage` to the **Keychain**
+  (`Store.swift`). Session rotation from the `X-GlassTube-Session` header is
+  captured in `API.onSessionRotated`.
+- The project is generated by **xcodegen** from `project.yml`. After adding a
+  Swift file run `xcodegen generate` in `ios/`, or the build will not see it.
+- Debug-only launch hooks, used for screenshots and for exercising the send
+  path without tapping: `GT_TAB`, `GT_QUERY`, `GT_SEND`. They are inside
+  `#if DEBUG` and cannot fire in a release build.
+- Icon replaced everywhere: `ios/.../AppIcon.appiconset`, `LaunchIcon`, and the
+  web set (`icon-96/128/192/512`, `apple-touch-icon`, `favicon*`,
+  `glasstube-icon-master`). The manifest icons carry `?v=3` so the Meta drawer
+  refetches them.
 
 ## Log
 
@@ -75,3 +161,6 @@ Test for Mike: swipe-kill GlassTube, open it, confirm 1.24 under the title. Phon
 2026-08-31 other: hunt-first resolve with in-page session InnerTube, relay probe gate, playlist play page, iOS 1.24/25. Details under To Mac.
 2026-08-31 other: wrote the full f0e1950 result summary under To other for the other computer's Cursor, asking it to pull, test with Mike, and report back under To Mac.
 2026-08-31 Mac: pulled 2ab0d1b, deployed glasstube.vercel.app, built 1.24 (25). Install blocked: iPhone developer tunnel unavailable.
+2026-09-14 Mac: route chain file>proxy>embed>go, phone sends the googlevideo file directly, glasses search and library, iOS 1.25 (26) installed. Details under To Mac.
+2026-09-14 Mac: durable pair link token (no more retyping the code), push carries the iPhone build, scripts/selftest.mjs, iOS 1.25 (27).
+2026-09-14 Mac: iPhone app rewritten in SwiftUI (2.0/28), new icon on both iOS and the Meta drawer, feed caching for YouTube's bursty RSS.

@@ -32,6 +32,23 @@ const ANDROID_SDKLESS = {
   name: '3',
 };
 
+const ANDROID_VR = {
+  key: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
+  ua: 'com.google.android.apps.youtube.vr.oculus/1.62.27 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+  client: {
+    clientName: 'ANDROID_VR',
+    clientVersion: '1.62.27',
+    deviceMake: 'Oculus',
+    deviceModel: 'Quest 3',
+    androidSdkVersion: 32,
+    osName: 'Android',
+    osVersion: '12L',
+    hl: 'en',
+    gl: 'US',
+  },
+  name: '28',
+};
+
 const IOS = {
   key: 'AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc',
   ua: 'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_5_0 like Mac OS X)',
@@ -202,27 +219,46 @@ function keepMedia(id, got, notes) {
   return got.media;
 }
 
+/* YouTube answers datacenter IPs with LOGIN_REQUIRED far more often than it
+   used to, so try every guest shape before falling back to the signed-in WEB
+   client. A visitorData lifted from a real page load is what separates a
+   "browser that has been here" from a bare bot on some of these. */
 async function resolve(id, auth) {
   const hit = cache.get(id);
   if (hit && hit.exp > Date.now()) return hit;
   const notes = [];
-  const guests = [ANDROID_SDKLESS, ANDROID, IOS];
+  const visitor = await visitorId();
+  const guests = [ANDROID_SDKLESS, ANDROID, ANDROID_VR, IOS];
   for (let i = 0; i < guests.length; i++) {
-    const got = await player(id, guests[i], null, {});
-    notes.push(noteLine(got));
-    const media = keepMedia(id, got, notes);
-    if (media) return media;
+    for (let pass = 0; pass < 2; pass++) {
+      const extra = pass === 1 && visitor ? { visitorData: visitor } : {};
+      if (pass === 1 && !visitor) continue;
+      const got = await player(id, guests[i], null, extra);
+      notes.push(noteLine(got) + (pass === 1 ? ':vd' : ''));
+      const media = keepMedia(id, got, notes);
+      if (media) return media;
+    }
   }
   if (auth) {
-    const visitor = await visitorId();
     const got = await player(id, WEB, auth, { visitorData: visitor });
-    notes.push(noteLine(got));
+    notes.push(noteLine(got) + ':auth');
     const media = keepMedia(id, got, notes);
     if (media) return media;
   }
   const err = new Error(notes.join(' | '));
   err.notes = notes;
   throw err;
+}
+
+/* The glasses hand back whatever session the phone gave them so a signed-in
+   resolve is possible even though the HUD never saw a Google login itself. */
+async function sessionFor(req) {
+  try {
+    const auth = await loadSession(req);
+    return (auth && auth.sess && auth.sess.at) || null;
+  } catch (e) {
+    return null;
+  }
 }
 
 function parseRange(header, total) {
@@ -303,6 +339,27 @@ export default async function handler(req, res) {
       return withSession(res, { ok: false, error: String((e && e.message) || e || 'resolve failed'), notes: (e && e.notes) || [] }, auth.token, auth.rotated);
     }
   }
+  if (String((req.query && req.query.probe) || '') === '1') {
+    const auth = await sessionFor(req);
+    try {
+      const media = await resolve(id, auth);
+      return json(res, 200, {
+        ok: true,
+        itag: itagOf(media.url),
+        mime: media.mime,
+        length: media.length || 0,
+        signedIn: !!auth,
+        notes: media.notes || [],
+      });
+    } catch (e) {
+      return json(res, 200, {
+        ok: false,
+        signedIn: !!auth,
+        error: String((e && e.message) || e || 'resolve failed'),
+        notes: (e && e.notes) || [],
+      });
+    }
+  }
   if (String((req.query && req.query.go) || '') === '1') {
     const origin = 'https://glasstube.vercel.app';
     const params = new URLSearchParams({
@@ -328,7 +385,7 @@ export default async function handler(req, res) {
   }
   let media;
   try {
-    media = await resolve(id);
+    media = await resolve(id, await sessionFor(req));
   } catch (e) {
     res.statusCode = 404;
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');

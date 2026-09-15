@@ -10,6 +10,15 @@
       ]
     },
     {
+      "source": "/(.*).(js|css)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
       "source": "/manifest.webmanifest",
       "headers": [
         {
@@ -36,7 +45,7 @@
       ]
     },
     {
-      "source": "/api/(pair|push|feed|oembed|watch|auth/.*|yt/.*)",
+      "source": "/api/(pair|push|feed|search|oembed|watch|auth/.*|yt/.*)",
       "headers": [
         {
           "key": "Cache-Control",
@@ -80,6 +89,10 @@
     {
       "source": "/api/diag",
       "destination": "/api/watch"
+    },
+    {
+      "source": "/api/search",
+      "destination": "/api/feed?mode=search"
     }
   ]
 }

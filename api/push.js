@@ -4,6 +4,26 @@ import { parseYouTube, oembed, keepPlayable, resolveHandle, channelFeed, playlis
 const VIDEO_RE = /^[a-zA-Z0-9_-]{11}$/;
 const MAX_PLAYLIST = 20;
 
+function isGoogleFile(u) {
+  return /^https:\/\/[a-z0-9.-]*googlevideo\.com\//i.test(u) &&
+    /videoplayback/i.test(u) &&
+    /[?&]itag=(18|22)(?:&|$)/.test(u) &&
+    u.length >= 100;
+}
+
+function isRelayFile(u) {
+  return /^http:\/\/\d{1,3}(?:\.\d{1,3}){3}:\d+\/s\/[a-zA-Z0-9_-]{11}$/.test(u);
+}
+
+/* Two delivery routes, kept apart on purpose.
+
+   u  the googlevideo file itself. HTTPS, so the HUD can play it inline without
+      tripping mixed content, and it keeps working after the phone sleeps. Only
+      valid from the public IP that resolved it, which is the phone's - and the
+      glasses share that IP whenever they share the phone's WiFi.
+   r  the phone's own LAN relay. Plain HTTP, so the HUD cannot load it inline;
+      it is the escape hatch for when u is refused, and costs a jump out of the
+      HUD to the phone's play page. */
 function slim(video) {
   const row = {
     id: video.id,
@@ -11,17 +31,13 @@ function slim(video) {
     channel: String(video.channel || '').slice(0, 80),
     thumb: video.thumb || ('https://i.ytimg.com/vi/' + video.id + '/hqdefault.jpg'),
   };
+  if (video.duration) row.duration = String(video.duration).slice(0, 12);
+  if (video.meta) row.meta = String(video.meta).slice(0, 80);
   const u = String(video.u || '');
-  if (/^http:\/\/\d{1,3}(?:\.\d{1,3}){3}:\d+\/s\/[a-zA-Z0-9_-]{11}$/.test(u)) {
-    row.u = u;
-  } else if (
-    /^https:\/\/[a-z0-9.-]*googlevideo\.com\//i.test(u) &&
-    /videoplayback/i.test(u) &&
-    /[?&]itag=(18|22)(?:&|$)/.test(u) &&
-    u.length >= 100
-  ) {
-    row.u = u.slice(0, 4000);
-  }
+  const r = String(video.r || '');
+  if (isGoogleFile(u)) row.u = u.slice(0, 4000);
+  else if (isRelayFile(u)) row.r = u;
+  if (!row.r && isRelayFile(r)) row.r = r;
   return row;
 }
 
@@ -57,11 +73,12 @@ async function resolveOne(raw) {
   return { list: false, video: slim(video) };
 }
 
-function pack(videos, name) {
+function pack(videos, name, app) {
   const first = videos[0];
   return Object.assign({}, first, {
     playlist: name || (videos.length > 1 ? 'Playlist' : ''),
     videos,
+    app: String(app || '').slice(0, 24),
     ts: Date.now(),
   });
 }
@@ -78,11 +95,21 @@ export default async function handler(req, res) {
   const channels = Array.isArray(body.channels) ? body.channels : null;
   const openChannel = body.openChannel || null;
   if (!code) return json(res, 200, { ok: false, error: 'Pairing code required' });
-  if (!channels && !(openChannel && openChannel.id) && !raw && !(incoming && incoming.length)) {
+  if (body.kind !== 'session' &&
+      !channels && !(openChannel && openChannel.id) && !raw && !(incoming && incoming.length)) {
     return json(res, 200, { ok: false, error: 'Paste a YouTube link or send a playlist' });
   }
 
   try {
+    if (body.kind === 'session') {
+      const blob = String(body.session || '');
+      const out = await rpc('glasstube_push', {
+        p_code: code,
+        p_video: { kind: 'session', session: blob, ts: Date.now() },
+      });
+      return json(res, 200, Object.assign({ ok: true }, out, { kind: 'session' }));
+    }
+
     if (channels) {
       const list = channels.slice(0, 24).map(c => ({
         name: String((c && c.name) || 'Channel').slice(0, 80),
@@ -147,7 +174,7 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: false, error: 'No playable videos in that list.' });
     }
 
-    const payload = pack(videos, name);
+    const payload = pack(videos, name, body.app);
     const first = videos[0] || {};
     console.log('[glasstube-push]', JSON.stringify({
       id: first.id || '',

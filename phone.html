@@ -351,7 +351,9 @@ button.google {
         <div class="a" id="acct-email"></div>
       </div>
     </div>
+    <button class="slim" id="btn-glasses-signin">Send sign-in to glasses</button>
     <button class="ghost" id="btn-logout">Sign out</button>
+    <p class="hint">Sending the sign-in lets the glasses open your subscriptions, playlists and liked videos on their own. It hands this Google session to the paired glasses, so only do it on glasses you own. "Sign out" here clears it on both.</p>
   </div>
   <div id="acct-msg" class="msg"></div>
 </section>
@@ -459,6 +461,7 @@ button.google {
 <script>
 const $ = s => document.querySelector(s);
 const CODE_KEY = 'glasstube.phone.code';
+const LINK_KEY = 'glasstube.phone.link';
 const RECENTS_KEY = 'glasstube.phone.recents';
 const SAVED_KEY = 'glasstube.phone.saved';
 const PLAYLISTS_KEY = 'glasstube.phone.playlists';
@@ -474,6 +477,8 @@ const DEFAULT_CHANNELS = [
 ];
 
 let code = '';
+let link = '';
+let reconnectTimer = 0;
 let editPl = -1;
 let busy = false;
 
@@ -548,7 +553,11 @@ function saveList(key, list) {
   catch (e) {}
 }
 
+let pairedNow = false;
+
 function setPaired(on) {
+  const changed = pairedNow !== !!on;
+  pairedNow = !!on;
   $('#pair-card').hidden = on;
   $('#pair-form').hidden = on;
   $('#pair-steps').hidden = on;
@@ -559,7 +568,8 @@ function setPaired(on) {
   $('#saved-card').hidden = !on;
   $('#playlist-card').hidden = !on;
   $('#code-shown').textContent = code;
-  if (on) {
+  // Reconnecting on every foreground would otherwise re-run every list fetch.
+  if (on && changed) {
     renderRecents();
     renderSaved();
     renderPlaylists();
@@ -896,7 +906,7 @@ function playYtPlaylist(id, name) {
 }
 
 function sendYtVideos(name, videos) {
-  if (!code) {
+  if (!pairKey()) {
     msg($('#lib-msg'), 'Pair first. Open From iPhone on the glasses and type the code.', 'err');
     return;
   }
@@ -904,7 +914,7 @@ function sendYtVideos(name, videos) {
     msg($('#lib-msg'), 'That list is empty.', 'err');
     return;
   }
-  sendPush({ code: code, name: name, videos: videos }, () => {
+  sendPush({ code: pairKey(), name: name, videos: videos }, () => {
     msg($('#lib-msg'), 'No internet. Retrying...', 'err');
   }).then(d => {
     logPushResult(d);
@@ -1239,8 +1249,8 @@ function saveChannels(list) {
 }
 
 function syncChannels() {
-  if (!code) return;
-  postJSON('/api/push', { code: code, channels: loadChannels() }).catch(() => {});
+  if (!pairKey()) return;
+  postJSON('/api/push', { code: pairKey(), channels: loadChannels() }).catch(() => {});
 }
 
 function renderChannels() {
@@ -1325,7 +1335,7 @@ function moveChannel(i, dir) {
 
 function sendChannelLatest(ch, count) {
   const n = count || 1;
-  if (!code) {
+  if (!pairKey()) {
     msg($('#ch-msg'), 'Pair first.', 'err');
     return;
   }
@@ -1344,7 +1354,7 @@ function sendChannelLatest(ch, count) {
         msg($('#ch-msg'), (d && d.error) || 'No videos on that channel.', 'err');
         return;
       }
-      return sendPush({ code: code, name: ch.name, videos: d.videos }, () => {
+      return sendPush({ code: pairKey(), name: ch.name, videos: d.videos }, () => {
         msg($('#ch-msg'), 'No internet. Retrying...', 'err');
       }).then(out => {
         busy = false;
@@ -1369,11 +1379,11 @@ function sendChannelLatest(ch, count) {
 }
 
 function browseChannel(ch) {
-  if (!code) {
+  if (!pairKey()) {
     msg($('#ch-msg'), 'Pair first.', 'err');
     return;
   }
-  keepPost('/api/push', { code: code, openChannel: { id: ch.id, name: ch.name } }, () => {
+  keepPost('/api/push', { code: pairKey(), openChannel: { id: ch.id, name: ch.name } }, () => {
     msg($('#ch-msg'), 'No internet. Retrying...', 'err');
   }).then(d => {
     if (!d.ok) {
@@ -1727,10 +1737,67 @@ function addToPlaylist(video) {
 
 function dropPair(reason) {
   code = '';
+  linkStore('');
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = 0; }
   try { localStorage.removeItem(CODE_KEY); } catch (e) {}
   setPaired(false);
   msg($('#pair-msg'), reason || 'Pair again. Open From iPhone on the glasses first.', 'err');
   $('#code').focus();
+}
+
+/* The link token is what keeps this phone paired. It is handed back the first
+   time a code works and it is good for a year past the last time either device
+   spoke, so reopening the app should never ask for six characters again. The
+   code itself still expires - that is the point of it. */
+function linkStore(t) {
+  link = String(t || '');
+  try {
+    if (link) localStorage.setItem(LINK_KEY, link);
+    else localStorage.removeItem(LINK_KEY);
+  } catch (e) {}
+}
+
+function pairKey() {
+  return link || code;
+}
+
+/* Reconnect is not the same as pair. If we hold a link token, a failure is
+   almost always the network or a sleeping glasses HUD, so keep trying quietly
+   instead of dumping the user back on the keypad. */
+function reconnect(attempt) {
+  const key = pairKey();
+  if (!key) return;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = 0; }
+  postJSON('/api/pair', { code: key, touch: true }).then(d => {
+    if (d && d.ok) {
+      if (d.token) linkStore(d.token);
+      if (d.code) {
+        code = d.code;
+        try { localStorage.setItem(CODE_KEY, code); } catch (e) {}
+      }
+      setPaired(true);
+      $('#code-shown').textContent = code;
+      msg($('#pair-msg'), 'Connected.', 'ok');
+      return;
+    }
+    if (!link) {
+      dropPair(d && d.error);
+      return;
+    }
+    // A live token that the server does not know means the glasses were reset.
+    if (/expired|not active|not found/i.test((d && d.error) || '')) {
+      linkStore('');
+      dropPair('The glasses were re-paired. Type the new code once.');
+      return;
+    }
+    scheduleReconnect(attempt);
+  }).catch(() => scheduleReconnect(attempt));
+}
+
+function scheduleReconnect(attempt) {
+  const n = Math.min(Number(attempt) || 0, 5);
+  msg($('#pair-msg'), 'Reconnecting to the glasses...', '');
+  reconnectTimer = setTimeout(() => reconnect(n + 1), 2000 * Math.pow(2, n));
 }
 
 function connect(c) {
@@ -1747,10 +1814,11 @@ function connect(c) {
       msg($('#pair-msg'), d.error || 'That code is not active. Open From iPhone on the glasses first.', 'err');
       return;
     }
-    code = want;
+    code = d.code || want;
+    linkStore(d.token || '');
     try { localStorage.setItem(CODE_KEY, code); } catch (e) {}
     setPaired(true);
-    msg($('#pair-msg'), 'Connected.', 'ok');
+    msg($('#pair-msg'), link ? 'Connected. This phone stays linked from now on.' : 'Connected.', 'ok');
     $('#url').focus();
   }).catch(e => msg($('#pair-msg'), netText(e), 'err'));
 }
@@ -1759,7 +1827,7 @@ function sendVideo(item) {
   const url = (item && (item.url || item.id))
     ? (item.url || ('https://youtu.be/' + item.id))
     : $('#url').value.trim();
-  if (!code) {
+  if (!pairKey()) {
     msg($('#send-msg'), 'Pair first. Open From iPhone on the glasses and type the code.', 'err');
     return;
   }
@@ -1772,7 +1840,7 @@ function sendVideo(item) {
   busy = true;
   logErr('send start ' + url);
   msg($('#send-msg'), 'Getting a playable file. If YouTube asks, tap Confirm on this phone.');
-  sendPush({ code: code, url: url }, () => {
+  sendPush({ code: pairKey(), url: url }, () => {
     msg($('#send-msg'), 'No internet. Retrying...', 'err');
   }).then(d => {
     busy = false;
@@ -1817,14 +1885,14 @@ function sendPlaylist(i) {
     msg($('#pl-msg'), 'Add at least one video first.', 'err');
     return;
   }
-  if (!code) {
+  if (!pairKey()) {
     msg($('#pl-msg'), 'Pair first.', 'err');
     return;
   }
   if (busy) return;
   busy = true;
   msg($('#pl-msg'), 'Sending...');
-  sendPush({ code: code, name: p.name, videos: p.videos }, () => {
+  sendPush({ code: pairKey(), name: p.name, videos: p.videos }, () => {
     msg($('#pl-msg'), 'No internet. Retrying...', 'err');
   }).then(d => {
     busy = false;
@@ -1857,9 +1925,28 @@ $('#ch-url').addEventListener('keydown', e => { if (e.key === 'Enter') addChanne
 renderChannels();
 $('#btn-google').addEventListener('click', startGoogle);
 $('#btn-logout').addEventListener('click', () => {
+  if (pairKey()) postJSON('/api/push', { code: pairKey(), kind: 'session', session: '' }).catch(() => {});
   setSession('');
   showSignedOut();
-  msg($('#acct-msg'), 'Signed out.', 'ok');
+  msg($('#acct-msg'), 'Signed out here and on the glasses.', 'ok');
+});
+$('#btn-glasses-signin').addEventListener('click', () => {
+  const t = sessionToken();
+  if (!t) {
+    msg($('#acct-msg'), 'Sign in with Google first.', 'err');
+    return;
+  }
+  if (!pairKey()) {
+    msg($('#acct-msg'), 'Pair with the glasses first.', 'err');
+    return;
+  }
+  msg($('#acct-msg'), 'Sending to the glasses...', '');
+  postJSON('/api/push', { code: pairKey(), kind: 'session', session: t })
+    .then(d => msg($('#acct-msg'),
+      d && d.ok ? 'Glasses signed in. Library and Search are on there now.'
+                : ((d && d.error) || 'Could not reach the glasses.'),
+      d && d.ok ? 'ok' : 'err'))
+    .catch(() => msg($('#acct-msg'), 'No internet. Try again.', 'err'));
 });
 $('#btn-yt-search').addEventListener('click', searchYouTube);
 $('#yt-q').addEventListener('keydown', e => { if (e.key === 'Enter') searchYouTube(); });
@@ -1946,13 +2033,13 @@ $('#btn-play-recents').addEventListener('click', () => {
     msg($('#send-msg'), 'Nothing in recents yet.', 'err');
     return;
   }
-  if (!code) {
+  if (!pairKey()) {
     msg($('#send-msg'), 'Pair first.', 'err');
     return;
   }
   if (busy) return;
   busy = true;
-  sendPush({ code: code, name: 'Recents', videos: rec }, () => {
+  sendPush({ code: pairKey(), name: 'Recents', videos: rec }, () => {
     msg($('#send-msg'), 'No internet. Retrying...', 'err');
   }).then(d => {
     busy = false;
@@ -2081,9 +2168,22 @@ $('#btn-add').addEventListener('click', () => {
 refreshAccount();
 
 try {
-  const saved = localStorage.getItem(CODE_KEY);
-  if (saved) connect(saved);
+  code = localStorage.getItem(CODE_KEY) || '';
+  link = localStorage.getItem(LINK_KEY) || '';
+  if (link) {
+    // Show the app as connected straight away; reconnect() only corrects it if
+    // the glasses really were re-paired behind our back.
+    setPaired(true);
+    reconnect(0);
+  } else if (code) {
+    connect(code);
+  }
 } catch (e) {}
+
+// Coming back from the background is exactly when the old build lost the pair.
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible' && pairKey()) reconnect(0);
+});
 </script>
 </body>
 </html>

@@ -8,3 +8,6 @@ ios/GlassTube.xcodeproj/xcuserdata/
 ios/GlassTube.xcodeproj/project.xcworkspace/xcuserdata/
 ios/DerivedData/
 ios/build/
+
+# Finder duplicates of the Xcode project, not real targets
+ios/GlassTube [0-9].xcodeproj/
