@@ -133,6 +133,12 @@ struct PasteboardSuggestion: View {
     }
 }
 
+/// Pairing status in the navigation bar.
+///
+/// Deliberately plain. From iOS 26 the toolbar gives its own items a Liquid
+/// Glass capsule, so adding another one here stacked a second capsule inside
+/// the first and the two edges did not line up. The system supplies the
+/// material; this only supplies the content.
 struct PairBadge: View {
     @EnvironmentObject private var store: Store
     let tap: () -> Void
@@ -147,13 +153,12 @@ struct PairBadge: View {
                     .fill(store.paired ? Color.green : Color.orange)
                     .frame(width: 7, height: 7)
                 Text(store.paired ? "Paired" : "Pair")
-                    .font(.caption.weight(.semibold))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .gtGlass(Capsule(), interactive: true)
         }
-        .buttonStyle(.plain)
+        // Status colour, not the app accent. A toolbar button inherits the
+        // tint, and with a red accent that rendered "Paired" in red - which
+        // reads as a failure for the one state that means everything worked.
+        .tint(store.paired ? Color.green : Color.orange)
         .accessibilityLabel(store.paired ? "Paired with glasses" : "Not paired")
     }
 }
