@@ -29,8 +29,8 @@ On the phone (a real SwiftUI app, not a wrapped web page):
 - **Settings** - appearance, accent, data saver, haptics, account, diagnostics
 - Swipe a video to save it, long-press for add-to-playlist / share, drag to reorder a list
 
-Light, dark or system, with six accents. Light mode is designed rather than
-inverted: every accent has a separate value per scheme, because a colour bright
+Light, dark or system, with six accents, defaulting to the icon's red. Light
+mode is designed rather than inverted: every accent has a separate value per scheme, because a colour bright
 enough to carry a dark UI goes pale and illegible on white.
 
 The visual layer is iOS 26's Liquid Glass - `glassEffect`, `.buttonStyle(.glassProminent)`,

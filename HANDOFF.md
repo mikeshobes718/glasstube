@@ -181,6 +181,21 @@ Apple's current HIG and the iOS 27 SDK, **not** reference-driven from Mobbin.
 Mobbin's MCP server was authorized after this session began, so its tools never
 registered. Re-running the design pass with Mobbin references is still open.
 
+### Red icon, 2026-09-14
+
+Icon redone in YouTube red at Mike's request, build **2.1 (30)**. Three variants
+were rendered and compared at 200/80/56/40px before picking: a straight recolour
+of the cyan mark and an all-red glowing version both collapse into a red blob at
+drawer size. The shipped one keeps a **white brow against the solid red panel** -
+that contrast is the only thing separating it from a generic red play button
+once it is small.
+
+The in-app accent now defaults to red too, so the app and its icon read as one
+thing. Anyone who prefers the old cyan picks "Glass" in Settings > Accent; the
+cyan values are still in `Theme.Accent`.
+
+Web icons went to `?v=4` so the Meta drawer refetches.
+
 ## Log
 
 2026-08-31 Mac: created this mailbox so Mac Cursor and the other Cursor can talk via GitLab.
@@ -191,3 +206,4 @@ registered. Re-running the design pass with Mobbin references is still open.
 2026-09-14 Mac: durable pair link token (no more retyping the code), push carries the iPhone build, scripts/selftest.mjs, iOS 1.25 (27).
 2026-09-14 Mac: iPhone app rewritten in SwiftUI (2.0/28), new icon on both iOS and the Meta drawer, feed caching for YouTube's bursty RSS.
 2026-09-14 Mac: Liquid Glass redesign, light/dark/system with per-scheme accents, real Settings tab, iOS 2.1 (29), target raised to iOS 26.
+2026-09-14 Mac: icon redone in YouTube red across iOS and the web set, app accent defaults to match, iOS 2.1 (30).

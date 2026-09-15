@@ -75,7 +75,9 @@ final class Theme: ObservableObject {
     }
 
     @AppStorage("glasstube.appearance") private var modeRaw = Mode.system.rawValue
-    @AppStorage("glasstube.accent") private var accentRaw = Accent.glass.rawValue
+    // Defaults to the icon's red so the app and its icon read as one thing.
+    // Anyone who prefers the old cyan is one tap away in Settings > Accent.
+    @AppStorage("glasstube.accent") private var accentRaw = Accent.red.rawValue
     @AppStorage("glasstube.haptics") var haptics = true
     @AppStorage("glasstube.dataSaver") var dataSaver = false
     @AppStorage("glasstube.confirmLists") var confirmLists = false
@@ -94,7 +96,7 @@ final class Theme: ObservableObject {
 /// Reads the accent through the environment's colour scheme, so every call
 /// site gets the variant that belongs to whatever the app is currently in.
 private struct AccentKey: EnvironmentKey {
-    static let defaultValue = Color(red: 0.22, green: 0.80, blue: 1.00)
+    static let defaultValue = Color(red: 1.00, green: 0.26, blue: 0.26)
 }
 
 extension EnvironmentValues {
