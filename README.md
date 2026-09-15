@@ -80,6 +80,17 @@ node scripts/selftest.mjs --no-browser     # API checks only
 npm i playwright-core                      # once, to enable the browser checks
 ```
 
+It also runs itself. `bash scripts/install-healthcheck.sh` installs a launchd
+agent that runs the check daily at 9:07am and stays quiet unless something
+fails, in which case it posts a notification. The log is at
+`~/Library/Logs/glasstube-health.log`; `--remove` uninstalls it.
+
+The installer copies the scripts to `~/Library/Application Support/GlassTube`
+rather than running them from here, because macOS will not let a launchd agent
+read `~/Documents` without Full Disk Access. Re-run the installer after editing
+`selftest.mjs` to refresh that copy. macOS may also ask once to allow
+notifications from Script Editor.
+
 The two failures that have actually happened are both guarded now:
 
 - **Version skew.** Every push carries the iPhone build. If the phone is older
