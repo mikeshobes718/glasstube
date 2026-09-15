@@ -20,8 +20,8 @@ targets:
       path: GlassTube/Info.plist
       properties:
         CFBundleDisplayName: GlassTube
-        CFBundleShortVersionString: "1.24"
-        CFBundleVersion: "25"
+        CFBundleShortVersionString: "2.0"
+        CFBundleVersion: "28"
         ITSAppUsesNonExemptEncryption: false
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -41,8 +41,8 @@ targets:
         PRODUCT_NAME: GlassTube
         DEVELOPMENT_TEAM: N7LRRN2YGY
         CODE_SIGN_STYLE: Automatic
-        MARKETING_VERSION: "1.24"
-        CURRENT_PROJECT_VERSION: 25
+        MARKETING_VERSION: "2.0"
+        CURRENT_PROJECT_VERSION: 28
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
     scheme:

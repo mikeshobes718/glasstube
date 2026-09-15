@@ -1,181 +1,105 @@
 import SwiftUI
 
-enum GlassPage: String, CaseIterable, Identifiable {
-    case phone
-    case hud
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .phone: return "Phone"
-        case .hud: return "Glasses"
-        }
-    }
-
-    var hint: String {
-        switch self {
-        case .phone: return "Pair once, then paste a YouTube link"
-        case .hud: return "Same screen the glasses show. For testing, not watching while you walk."
-        }
-    }
-}
-
 struct RootView: View {
-    @State private var page: GlassPage = .phone
-    @State private var pendingWatch: String?
-    @State private var authBlob = ""
-    @State private var reloadToken: [GlassPage: Int] = [.phone: 0, .hud: 0]
-    @State private var ready: [GlassPage: Bool] = [.phone: false, .hud: false]
+    @StateObject private var store = Store()
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var tab = Tab.initial
     @State private var unlockId: String?
-    @State private var unlockKeep: String?
+    @State private var pendingLink: String?
 
-    private var phoneURL: URL {
-        var parts = URLComponents(string: "https://glasstube.vercel.app/phone")!
-        var items = [URLQueryItem(name: "v", value: "6")]
-        if let raw = pendingWatch, !raw.isEmpty {
-            items.append(URLQueryItem(name: "url", value: raw))
+    enum Tab: Hashable {
+        case send, search, library, glasses
+
+        /// Debug builds can launch straight onto a tab, so screenshots and
+        /// manual checks do not depend on tapping through the UI first.
+        static var initial: Tab {
+            #if DEBUG
+            switch ProcessInfo.processInfo.environment["GT_TAB"] {
+            case "search": return .search
+            case "library": return .library
+            case "glasses": return .glasses
+            default: return .send
+            }
+            #else
+            return .send
+            #endif
         }
-        parts.queryItems = items
-        return parts.url!
-    }
-
-    private var hudURL: URL {
-        URL(string: "https://glasstube.vercel.app/")!
-    }
-
-    private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Image("LaunchIcon")
-                    .resizable()
-                    .frame(width: 28, height: 28)
-                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("GlassTube")
-                        .font(.headline)
-                        .foregroundStyle(Color(red: 0, green: 0.83, blue: 1))
-                    if !appVersion.isEmpty {
-                        Text(appVersion)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color(white: 0.72))
-                    }
-                }
-                Picker("Page", selection: $page) {
-                    ForEach(GlassPage.allCases) { item in
-                        Text(item.title).tag(item)
-                    }
-                }
-                .pickerStyle(.segmented)
-                Button {
-                    ready[page] = false
-                    reloadToken[page, default: 0] += 1
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.body.weight(.semibold))
-                }
-                .accessibilityLabel("Reload")
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
-            .background(Color.black)
-
-            Text(page.hint)
-                .font(.footnote)
-                .foregroundStyle(Color(white: 0.72))
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.black)
-
-            ZStack {
-                WebScreen(url: phoneURL, reloadToken: reloadToken[.phone, default: 0], authBlob: authBlob) {
-                    ready[.phone] = true
-                }
-                .opacity(page == .phone ? 1 : 0)
-                .allowsHitTesting(page == .phone)
-                WebScreen(url: hudURL, reloadToken: reloadToken[.hud, default: 0]) {
-                    ready[.hud] = true
-                }
-                .opacity(page == .hud ? 1 : 0)
-                .allowsHitTesting(page == .hud)
-
-                if let id = unlockId ?? unlockKeep {
-                    YouTubeUnlockScreen(videoId: id)
-                        .opacity(unlockId == nil ? 0 : 1)
-                        .allowsHitTesting(unlockId != nil)
-                }
-
-                if ready[page] != true && unlockId == nil {
-                    BrandSplash()
-                }
-            }
+        TabView(selection: $tab) {
+            SendView()
+                .tabItem { Label("Send", systemImage: "paperplane") }
+                .tag(Tab.send)
+            SearchView()
+                .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                .tag(Tab.search)
+            LibraryView()
+                .tabItem { Label("Library", systemImage: "rectangle.stack") }
+                .tag(Tab.library)
+            GlassesView()
+                .tabItem { Label("Glasses", systemImage: "eyeglasses") }
+                .tag(Tab.glasses)
         }
-        .background(Color.black.ignoresSafeArea())
+        .tint(.gtAccent)
+        .environmentObject(store)
+        // The resolver sometimes has to show YouTube's own sign-in page to get
+        // a file. It takes over the screen because tapping through it is the
+        // whole point; nothing else is interactive until it is done.
+        .fullScreenCover(item: Binding(
+            get: { unlockId.map(UnlockRequest.init) },
+            set: { if $0 == nil { unlockId = nil } }
+        )) { req in
+            YouTubeUnlockScreen(videoId: req.id)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .gtUnlock)) { note in
-            if let id = note.userInfo?["id"] as? String, !id.isEmpty {
-                page = .phone
-                unlockKeep = id
-                unlockId = id
-            }
+            if let id = note.userInfo?["id"] as? String, !id.isEmpty { unlockId = id }
         }
         .onReceive(NotificationCenter.default.publisher(for: .gtUnlockDone)) { _ in
             unlockId = nil
         }
-        .onOpenURL { incoming in
-            if incoming.scheme == "glasstube" && incoming.host == "oauth" {
-                let items = URLComponents(url: incoming, resolvingAgainstBaseURL: false)?.queryItems
-                if let blob = items?.first(where: { $0.name == "s" })?.value, !blob.isEmpty {
-                    authBlob = blob
-                    page = .phone
-                }
-                return
+        .task {
+            store.reconnect()
+            await store.refreshAccount()
+            #if DEBUG
+            // Lets the whole resolve-and-push path be exercised from a launch
+            // argument, which a deep link cannot do under the simulator's own
+            // "Open in..." prompt.
+            if let seed = ProcessInfo.processInfo.environment["GT_SEND"], !seed.isEmpty {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                await store.send(link: seed)
             }
-            if let watch = watchURL(from: incoming) {
-                pendingWatch = watch
-                page = .phone
-                ready[.phone] = false
-                reloadToken[.phone, default: 0] += 1
+            #endif
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Coming back from the background is exactly when the pair used to
+            // be lost, so re-establish it every time rather than on launch only.
+            if phase == .active { store.reconnect() }
+        }
+        .onOpenURL { incoming in
+            if incoming.scheme == "glasstube", incoming.host == "oauth" { return }
+            if let raw = watchURL(from: incoming) {
+                tab = .send
+                Task { await store.send(link: raw) }
             }
         }
     }
 }
 
-struct BrandSplash: View {
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            VStack(spacing: 16) {
-                Image("LaunchIcon")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 128, height: 128)
-                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-                Text("GlassTube")
-                    .font(.title.weight(.bold))
-                    .foregroundStyle(Color(red: 0, green: 0.83, blue: 1))
-            }
-        }
-    }
+private struct UnlockRequest: Identifiable {
+    let id: String
 }
 
 func watchURL(from url: URL) -> String? {
     let s = url.absoluteString
     if url.scheme == "glasstube" {
-        if let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems {
-            if let found = items.first(where: { $0.name == "url" || $0.name == "v" })?.value, !found.isEmpty {
-                return found
-            }
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        if let found = items?.first(where: { $0.name == "url" || $0.name == "v" })?.value,
+           !found.isEmpty {
+            return found
         }
         return nil
     }
-    if s.contains("youtube.com") || s.contains("youtu.be") {
-        return s
-    }
+    if s.contains("youtube.com") || s.contains("youtu.be") { return s }
     return nil
 }

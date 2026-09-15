@@ -1340,10 +1340,19 @@ enum StreamResolver {
                 var google = videos[i]["u"] as? String
                 if !isPlayableFile(google) { google = nil }
                 videos[i]["u"] = nil
+                videos[i]["r"] = nil
                 if let found = google ?? url(for: id, session: blob) {
+                    // u is the file itself over HTTPS. Google signs this phone's
+                    // public IP into it, and the glasses share that IP whenever
+                    // they share this phone's WiFi - so it plays inside the HUD,
+                    // and keeps playing after this app is backgrounded.
+                    videos[i]["u"] = found
+                    // r is the LAN relay, kept only as the escape hatch. It is
+                    // plain HTTP, so the HTTPS HUD cannot load it inline; taking
+                    // it costs the wearer the whole HUD.
                     let pub = MediaRelay.shared.publishResult(id: id, google: found)
                     if pub.probeOk, let local = pub.local {
-                        videos[i]["u"] = local
+                        videos[i]["r"] = local
                     } else {
                         log("relay skip \(id) probe=\(pub.probeOk) wifi=\(pub.local != nil)")
                     }
@@ -1352,21 +1361,34 @@ enum StreamResolver {
             payload["videos"] = videos
         } else if let raw = payload["url"] as? String, let id = videoId(from: raw) {
             if let u = url(for: id, session: blob) {
+                var row: [String: Any] = ["id": id, "u": u, "url": raw]
                 let pub = MediaRelay.shared.publishResult(id: id, google: u)
                 if pub.probeOk, let local = pub.local {
-                    payload["videos"] = [["id": id, "u": local, "url": raw] as [String: Any]]
+                    row["r"] = local
                 } else {
                     log("relay skip \(id) probe=\(pub.probeOk) wifi=\(pub.local != nil)")
                 }
+                payload["videos"] = [row]
             }
         }
         log("attach done hasFile=\(payloadHasFile(payload)) urlLen=\(payloadUrlLen(payload))")
     }
 
-    static func postPush(_ payload: [String: Any]) -> [String: Any] {
+    static func appVersion() -> String {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        return "\(v) (\(b))"
+    }
+
+    static func postPush(_ original: [String: Any]) -> [String: Any] {
         guard let endpoint = URL(string: "https://glasstube.vercel.app/api/push") else {
             return ["ok": false, "error": "Missing push URL", "network": true]
         }
+        // Stamp the build onto the push. A HUD that is newer than the phone is
+        // what broke playback before: the glasses waited for a payload this app
+        // had no code to send, and nothing on either side said so.
+        var payload = original
+        payload["app"] = appVersion()
         let hasFile = payloadHasFile(payload)
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
@@ -1399,7 +1421,7 @@ enum StreamResolver {
         if !hasFile {
             out["fileError"] = wasSkip()
                 ? "You cancelled YouTube. Send again, sign in, then wait for Play. Do not tap Cancel send."
-                : "Sent, but YouTube blocked the file on this phone. Stay on WiFi, keep the Phone tab open, then send again."
+                : "Sent, but YouTube would not hand this phone a file. The glasses will still try their own routes. Stay on WiFi and send again if nothing plays."
         }
         return out
     }
@@ -1441,10 +1463,10 @@ enum StreamResolver {
     private static func payloadHasFile(_ payload: [String: Any]) -> Bool {
         if let videos = payload["videos"] as? [[String: Any]] {
             return videos.contains { row in
-                isPlayableFile(row["u"] as? String) || isRelayFile(row["u"] as? String)
+                isPlayableFile(row["u"] as? String) || isRelayFile(row["r"] as? String)
             }
         }
-        return isPlayableFile(payload["u"] as? String) || isRelayFile(payload["u"] as? String)
+        return isPlayableFile(payload["u"] as? String) || isRelayFile(payload["r"] as? String)
     }
 
     private static func isRelayFile(_ raw: String?) -> Bool {
