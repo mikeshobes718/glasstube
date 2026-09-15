@@ -25,8 +25,17 @@ On the phone (a real SwiftUI app, not a wrapped web page):
 - **Send** - paste or share a link, recently sent, saved videos, your playlists, your channels
 - **Search** - native YouTube search, tap a result to send it, or send all 20 at once
 - **Library** - subscriptions, playlists, liked and watch later, once you sign in
-- **Glasses** - pairing, account, diagnostics, and a framed preview of the HUD
+- **Glasses** - pairing, sending the sign-in across, and a framed preview of the HUD
+- **Settings** - appearance, accent, data saver, haptics, account, diagnostics
 - Swipe a video to save it, long-press for add-to-playlist / share, drag to reorder a list
+
+Light, dark or system, with six accents. Light mode is designed rather than
+inverted: every accent has a separate value per scheme, because a colour bright
+enough to carry a dark UI goes pale and illegible on white.
+
+The visual layer is iOS 26's Liquid Glass - `glassEffect`, `.buttonStyle(.glassProminent)`,
+a tab bar that minimises on scroll, soft scroll-edge effects. Deployment target
+is iOS 26; `Theme.swift` wraps every glass call so an older fallback is one edit.
 
 ## How a video actually gets to the glasses
 
@@ -115,15 +124,16 @@ On a computer, open the same URL and use arrow keys plus Enter to rehearse. Left
 
 ## iPhone app
 
-Native SwiftUI, four tabs, bundle `com.mikeshobes.glasstube`. Version 2.0 onward;
+Native SwiftUI, five tabs, bundle `com.mikeshobes.glasstube`. Version 2.0 onward;
 everything before that was `phone.html` in a WKWebView.
 
 | File | What it holds |
 | --- | --- |
 | `Models.swift` | `Video`, `ChannelRef`, `NamedList`, `Account`, `SendOutcome` |
+| `Theme.swift` | appearance mode, accents per scheme, glass helpers, haptics |
 | `Store.swift` | app state, Keychain for the Google session, UserDefaults for lists |
 | `API.swift` | typed async client for every server endpoint |
-| `SendView` / `SearchView` / `LibraryView` / `GlassesView` | the four tabs |
+| `SendView` / `SearchView` / `LibraryView` / `GlassesView` / `SettingsView` | the five tabs |
 | `WebScreen.swift` | the stream resolver, plus the HUD preview's web view |
 
 The one thing that is still a web view is the HUD preview, because the HUD

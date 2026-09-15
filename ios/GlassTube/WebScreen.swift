@@ -1626,11 +1626,16 @@ enum StreamResolver {
         return nil
     }
 
+    /// Set from Settings. The HUD is 600x600, so 360p is genuinely hard to tell
+    /// from 720p there, and the saving in data and battery is not.
+    nonisolated(unsafe) static var dataSaver = false
+
     private static func pickURL(_ formats: [[String: Any]]) -> String? {
+        let ceiling = dataSaver ? 360 : 720
         let progressive = formats.filter { row in
             let mime = String(describing: row["mimeType"] ?? "")
             let height = asInt(row["height"])
-            return mime.contains("video/mp4") && mime.contains("mp4a") && height > 0 && height <= 720 && mediaURL(row["url"]) != nil
+            return mime.contains("video/mp4") && mime.contains("mp4a") && height > 0 && height <= ceiling && mediaURL(row["url"]) != nil
         }.sorted {
             asInt($0["height"]) > asInt($1["height"])
         }

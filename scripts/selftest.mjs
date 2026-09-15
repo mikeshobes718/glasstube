@@ -193,7 +193,7 @@ async function checkPushRoundTrip(pair, fileUrl) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         code: pair.token,
-        app: '2.0 (28)',
+        app: '2.1 (29)',
         videos: [{ id: SAMPLE, title: 'selftest', channel: 'selftest', u: fileUrl, r: relay }],
       }),
     });
@@ -209,7 +209,7 @@ async function checkPushRoundTrip(pair, fileUrl) {
     else bad('file URL survives the round trip', 'got ' + String(v.u).slice(0, 60));
     if (v.r === relay) ok('relay URL kept separate from the file URL');
     else bad('relay URL kept separate', 'got ' + String(v.r));
-    if (d.dest && d.dest.app === '2.0 (28)') ok('phone build reaches the HUD', d.dest.app);
+    if (d.dest && d.dest.app === '2.1 (29)') ok('phone build reaches the HUD', d.dest.app);
     else bad('phone build reaches the HUD', String(d.dest && d.dest.app));
   } catch (e) { bad('poll after push', e.message); }
 }
@@ -312,7 +312,7 @@ async function runPlayback(browser, fileUrl) {
   if (fileUrl) {
     const { page } = await openHud(browser);
     await page.evaluate((u) => {
-      applyPush({ id: 'selftest', app: '2.0 (28)', videos: [{ id: 'SELFTESTID0', title: 'selftest', u }] });
+      applyPush({ id: 'selftest', app: '2.1 (29)', videos: [{ id: 'SELFTESTID0', title: 'selftest', u }] });
     }, fileUrl);
     const s = await settle(page, 20);
     if (s && s.state === 1 && s.route === 'file') ok('plays the phone file route', s.t.toFixed(1) + 's in');

@@ -155,6 +155,32 @@ what the app shows; it stays deployed as the browser fallback only.
   `glasstube-icon-master`). The manifest icons carry `?v=3` so the Meta drawer
   refetches them.
 
+### Redesign and settings, 2026-09-14
+
+iPhone app **2.1 (29)**. Deployment target raised to **iOS 26** - the phone runs
+iOS 27 and the SDK is 27, so Liquid Glass is used natively rather than behind
+availability checks everywhere.
+
+- `Theme.swift` is the design system: appearance mode (system/light/dark), six
+  accents with a **separate value per colour scheme**, `gtGlass` / `gtSoftScrollEdges`
+  / `gtTabBarMinimize` wrappers, and a `Haptics` switch. Every glass call goes
+  through those wrappers, so a fallback for an older OS is one edit.
+- `.preferredColorScheme(.dark)` is gone from `GlassTubeApp`. It is driven from
+  `RootView` by the setting. The old build hardcoded dark and then assumed dark
+  underneath, which is why light mode was not a switch away.
+- New `SettingsView` (fifth tab): appearance, accent, data saver, confirm-before-list,
+  haptics, account, pairing summary, re-send channels, diagnostics, a plain-English
+  "how a video gets there" page, and reset-local-data.
+- `StreamResolver.dataSaver` caps the format at 360p when Settings asks. The HUD
+  is 600x600, so the difference is hard to see and the saving is not.
+- The Glasses tab lost account and diagnostics to Settings; it is now connection,
+  sign-in handoff and the HUD preview.
+
+Note for whoever picks this up: the visual layer is my own design against
+Apple's current HIG and the iOS 27 SDK, **not** reference-driven from Mobbin.
+Mobbin's MCP server was authorized after this session began, so its tools never
+registered. Re-running the design pass with Mobbin references is still open.
+
 ## Log
 
 2026-08-31 Mac: created this mailbox so Mac Cursor and the other Cursor can talk via GitLab.
@@ -164,3 +190,4 @@ what the app shows; it stays deployed as the browser fallback only.
 2026-09-14 Mac: route chain file>proxy>embed>go, phone sends the googlevideo file directly, glasses search and library, iOS 1.25 (26) installed. Details under To Mac.
 2026-09-14 Mac: durable pair link token (no more retyping the code), push carries the iPhone build, scripts/selftest.mjs, iOS 1.25 (27).
 2026-09-14 Mac: iPhone app rewritten in SwiftUI (2.0/28), new icon on both iOS and the Meta drawer, feed caching for YouTube's bursty RSS.
+2026-09-14 Mac: Liquid Glass redesign, light/dark/system with per-scheme accents, real Settings tab, iOS 2.1 (29), target raised to iOS 26.

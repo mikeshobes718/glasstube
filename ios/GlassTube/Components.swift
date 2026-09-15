@@ -1,10 +1,5 @@
 import SwiftUI
 
-extension Color {
-    static let gtAccent = Color(red: 0.13, green: 0.78, blue: 1.0)
-    static let gtCard = Color(.secondarySystemGroupedBackground)
-}
-
 /// 16:9 thumbnail with the duration burned into the corner, the way every
 /// video app on this phone draws one.
 struct Thumb: View {
@@ -32,7 +27,7 @@ struct Thumb: View {
                     .monospacedDigit()
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
-                    .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 5))
+                    .background(.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 6))
                     .foregroundStyle(.white)
                     .padding(5)
             }
@@ -74,6 +69,7 @@ struct VideoRow: View {
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
                 store.toggleSaved(video)
+                Haptics.tap()
             } label: {
                 Label(store.isSaved(video) ? "Unsave" : "Save",
                       systemImage: store.isSaved(video) ? "bookmark.slash" : "bookmark")
@@ -126,7 +122,7 @@ struct OutcomeBanner: View {
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(tone.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .gtGlass(RoundedRectangle(cornerRadius: 14, style: .continuous), tint: tone.opacity(0.28))
     }
 }
 
@@ -170,7 +166,7 @@ struct SendingOverlay: View {
             }
             .padding(24)
             .frame(maxWidth: 280)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .gtGlass(RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
         .transition(.opacity)
     }

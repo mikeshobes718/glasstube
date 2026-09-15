@@ -37,12 +37,10 @@ struct SendView: View {
                         }
                     }
 
-                    Button(action: sendPasted) {
-                        Label("Send to glasses", systemImage: "eyeglasses")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(pasted.trimmingCharacters(in: .whitespaces).isEmpty || !store.canSend)
+                    SendButton(
+                        disabled: pasted.trimmingCharacters(in: .whitespaces).isEmpty || !store.canSend,
+                        action: sendPasted
+                    )
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
 
                     PasteboardSuggestion { link in
@@ -96,6 +94,7 @@ struct SendView: View {
                 }
             }
             .navigationTitle("GlassTube")
+            .gtSoftScrollEdges()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     PairBadge { showPair = true }
@@ -139,20 +138,59 @@ struct PairBadge: View {
     let tap: () -> Void
 
     var body: some View {
-        Button(action: tap) {
+        Button {
+            Haptics.tap()
+            tap()
+        } label: {
             HStack(spacing: 5) {
                 Circle()
                     .fill(store.paired ? Color.green : Color.orange)
-                    .frame(width: 8, height: 8)
+                    .frame(width: 7, height: 7)
                 Text(store.paired ? "Paired" : "Pair")
                     .font(.caption.weight(.semibold))
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .gtGlass(Capsule(), interactive: true)
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(store.paired ? "Paired with glasses" : "Not paired")
     }
 }
 
+/// The one button the whole app exists for. Glass-prominent where the OS has
+/// it, so it picks up the same material as the tab bar above it.
+struct SendButton: View {
+    let disabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
+            Label("Send to glasses", systemImage: "eyeglasses")
+                .font(.body.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+        }
+        .modifier(ProminentGlass())
+        .disabled(disabled)
+    }
+}
+
+private struct ProminentGlass: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.buttonStyle(.glassProminent)
+        } else {
+            content.buttonStyle(.borderedProminent)
+        }
+    }
+}
+
 struct PairPrompt: View {
+    @Environment(\.gtAccent) private var accent
     let tap: () -> Void
 
     var body: some View {
@@ -160,7 +198,7 @@ struct PairPrompt: View {
             HStack(spacing: 12) {
                 Image(systemName: "eyeglasses")
                     .font(.title2)
-                    .foregroundStyle(Color.gtAccent)
+                    .foregroundStyle(accent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Pair with your glasses").font(.subheadline.weight(.semibold))
                     Text("Open GlassTube on the glasses, then type the code once.")

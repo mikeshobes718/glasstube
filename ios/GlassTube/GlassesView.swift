@@ -8,14 +8,9 @@ struct GlassesView: View {
     @State private var reloadToken = 0
     @State private var showPair = false
     @State private var showPreview = false
+    @State private var note = ""
 
     private var hudURL: URL { URL(string: API.origin + "/")! }
-
-    private var appVersion: String {
-        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-        return "\(v) (\(b))"
-    }
 
     var body: some View {
         NavigationStack {
@@ -47,18 +42,19 @@ struct GlassesView: View {
                 }
 
                 Section {
-                    NavigationLink { AccountView() } label: {
-                        HStack {
-                            Label("Account", systemImage: "person.crop.circle")
-                            Spacer()
-                            Text(store.account?.name ?? (store.signedIn ? "Signed in" : "Not signed in"))
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
+                    Button {
+                        Haptics.tap()
+                        Task { note = await store.sendSignInToGlasses() }
+                    } label: {
+                        Label("Send sign-in to glasses", systemImage: "person.badge.key")
                     }
-                    NavigationLink { DiagnosticsView() } label: {
-                        Label("Diagnostics", systemImage: "stethoscope")
-                    }
+                    .disabled(!store.canSend || !store.signedIn)
+                } header: {
+                    Text("Library on the glasses")
+                } footer: {
+                    Text(note.isEmpty
+                         ? "Lets the glasses open your subscriptions and playlists on their own. Only do it on glasses you own."
+                         : note)
                 }
 
                 Section {
@@ -73,12 +69,9 @@ struct GlassesView: View {
                     Text("The same 600x600 screen the glasses draw. For checking a change, not for watching while you walk.")
                 }
 
-                Section {
-                    LabeledContent("App", value: appVersion)
-                    LabeledContent("Server", value: "glasstube.vercel.app")
-                }
             }
             .navigationTitle("Glasses")
+            .gtSoftScrollEdges()
             .sheet(isPresented: $showPair) { PairView() }
             .sheet(isPresented: $showPreview) {
                 NavigationStack {
@@ -104,6 +97,7 @@ struct GlassesView: View {
 /// The web HUD framed as a device, so it reads as a preview of the glasses
 /// rather than a browser someone forgot to style.
 struct HudPreview: View {
+    @Environment(\.gtAccent) private var accent
     let url: URL
     let reloadToken: Int
 
@@ -116,9 +110,9 @@ struct HudPreview: View {
                     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .strokeBorder(Color.gtAccent.opacity(0.45), lineWidth: 2)
+                            .strokeBorder(accent.opacity(0.45), lineWidth: 2)
                     )
-                    .shadow(color: Color.gtAccent.opacity(0.22), radius: 18)
+                    .shadow(color: accent.opacity(0.22), radius: 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             Text("Arrow keys and Return drive it here, the same way the Neural Band does on the glasses.")

@@ -309,6 +309,17 @@ final class Store: ObservableObject {
         lists.insert(NamedList(name: clean), at: 0)
     }
 
+    /// Clears what this phone has collected, and nothing else. Pairing and the
+    /// Google session are deliberately untouched - losing those means retyping
+    /// a code and signing in again, which is not what "reset local data" means
+    /// to anyone reading the button.
+    func resetLocal() {
+        recents = []
+        saved = []
+        lists = []
+        channels = Store.starterChannels
+    }
+
     func addChannel(_ ch: ChannelRef) {
         guard !channels.contains(where: { $0.id == ch.id }) else { return }
         channels.append(ch)

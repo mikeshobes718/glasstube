@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		066B9BAB5A05541B98E391FF /* WebScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F87605535F4847E7B1312D25 /* WebScreen.swift */; };
+		14F7E1793AC4CD43968C3BC3 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DD826BE527C494B28792F14 /* Theme.swift */; };
+		4A59E8217E4525079E45A7DC /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A591E4992CBDCDE3270B2C30 /* SettingsView.swift */; };
 		531F61128C90FA48F1D3DD1D /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BF13FEAAD4CF28C9AFED65B /* Store.swift */; };
 		57B561A1D9169955FB460C60 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 445129018490C1EB90E90A90 /* Assets.xcassets */; };
 		6132BFC5F649745A12F872DC /* PairView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C74FD3BE1DC2281D803C6B3 /* PairView.swift */; };
@@ -31,6 +33,7 @@
 		05A4AF27A9357531481E26E3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		0C74FD3BE1DC2281D803C6B3 /* PairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairView.swift; sourceTree = "<group>"; };
 		0D0CEE6DF2E300CD5307C0D4 /* AccountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountView.swift; sourceTree = "<group>"; };
+		0DD826BE527C494B28792F14 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		0EA4C43243A4E1A699298ADC /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		1BF13FEAAD4CF28C9AFED65B /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
 		2EB00AE428B2DFAA40A44C34 /* MediaRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaRelay.swift; sourceTree = "<group>"; };
@@ -41,6 +44,7 @@
 		8666BD399953D69F7C928312 /* GlassesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassesView.swift; sourceTree = "<group>"; };
 		8FB146EDB1FDE26D142F3B47 /* ListsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListsView.swift; sourceTree = "<group>"; };
 		9741BA4AECB0572CEAA9C7F9 /* SendView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SendView.swift; sourceTree = "<group>"; };
+		A591E4992CBDCDE3270B2C30 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		ACF685E60886879D8154E933 /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 		C4939B1E2F1AE0E55FA86A35 /* GlassTube.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GlassTube.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D55F3DC9FEF590A495F153F8 /* GoogleAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleAuth.swift; sourceTree = "<group>"; };
@@ -84,7 +88,9 @@
 				0EA4C43243A4E1A699298ADC /* RootView.swift */,
 				ACF685E60886879D8154E933 /* SearchView.swift */,
 				9741BA4AECB0572CEAA9C7F9 /* SendView.swift */,
+				A591E4992CBDCDE3270B2C30 /* SettingsView.swift */,
 				1BF13FEAAD4CF28C9AFED65B /* Store.swift */,
+				0DD826BE527C494B28792F14 /* Theme.swift */,
 				F87605535F4847E7B1312D25 /* WebScreen.swift */,
 			);
 			path = GlassTube;
@@ -175,7 +181,9 @@
 				E2A246F557FA15F7815F0263 /* RootView.swift in Sources */,
 				EDF31F5F4E87D82A44A5CC4E /* SearchView.swift in Sources */,
 				7545944CD64C5E06C89CEA1D /* SendView.swift in Sources */,
+				4A59E8217E4525079E45A7DC /* SettingsView.swift in Sources */,
 				531F61128C90FA48F1D3DD1D /* Store.swift in Sources */,
+				14F7E1793AC4CD43968C3BC3 /* Theme.swift in Sources */,
 				066B9BAB5A05541B98E391FF /* WebScreen.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -254,7 +262,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = N7LRRN2YGY;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = GlassTube/Info.plist;
@@ -262,7 +270,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mikeshobes.glasstube;
 				PRODUCT_NAME = GlassTube;
 				SDKROOT = iphoneos;
@@ -276,7 +284,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = N7LRRN2YGY;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = GlassTube/Info.plist;
@@ -284,7 +292,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mikeshobes.glasstube;
 				PRODUCT_NAME = GlassTube;
 				SDKROOT = iphoneos;
