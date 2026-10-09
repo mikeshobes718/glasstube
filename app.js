@@ -834,7 +834,10 @@ function openPlayer(index, autoplay, startAt, opts) {
   const attempt = wayPos;
   const route = wayChain[wayPos] || 'proxy';
   Player.setHandlers(playNext, updateChrome);
+  hudNote('route', { route: route, attempt: attempt, chain: wayChain.join('>'), hasU: !!video.u });
   Player.load(video, autoplay, startAt || 0, route).then(function (ok) {
+    hudNote('loaded', { route: route, ok: !!ok, err: ok ? '' : String(Player.lastError() || ''),
+      code: Player.lastCode ? Player.lastCode() : 0 });
     if (!ok) {
       const err = Player.lastError() || 'Could not start this route.';
       const code = Player.lastCode ? Player.lastCode() : 0;
@@ -850,6 +853,8 @@ function openPlayer(index, autoplay, startAt, opts) {
         if (nowPlaying && nowPlaying.id !== video.id) return;
         if (wayPos !== attempt) return;
         const snap = Player.snapshot();
+        hudNote('check3s', { route: route, playing: !!snap.playing, paused: !!snap.paused,
+          error: snap.error || '', time: snap.time });
         if (snap.playing || snap.paused || snap.error) return;
         needGesture = true;
         setPlayGate(true, video.title, 'Enter to play');
@@ -862,6 +867,7 @@ function openPlayer(index, autoplay, startAt, opts) {
         const snap = Player.snapshot();
         if (snap.playing || snap.paused || snap.ended || snap.error) return;
         if (snap.time > 0.4) return;
+        hudNote('stalled', { route: route, time: snap.time, gate: needGesture });
         if (!tryNextWay(video.id, routeLabel(route) + ' stalled', 0) && !needGesture) {
           skipUnplayable(routeLabel(route) + ' stalled', 0);
         }
@@ -1486,6 +1492,23 @@ function stopPairPoll() {
   pairTimer = null;
 }
 
+/* What the HUD did with a push, posted to the server log next to the phone's
+   own resolve report. The glasses have no console anyone can read, and "it
+   says playing but nothing happens" is otherwise invisible from both ends. */
+function hudNote(ev, extra) {
+  try {
+    const body = Object.assign({
+      kind: 'hud', ev: ev, screen: current, vis: document.visibilityState,
+      id: nowPlaying && nowPlaying.id, route: wayChain && wayChain[wayPos],
+    }, extra || {});
+    fetch('/api/watch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).catch(function () {});
+  } catch (e) { /* diagnostics only */ }
+}
+
 function pollPair() {
   if (!pairKey()) return;
   fetch('/api/pair?code=' + encodeURIComponent(pairKey()))
@@ -1545,6 +1568,9 @@ function pollPair() {
         // loaded. Ack it but never auto-play it, so a forgotten tab stays silent.
         const stale = playable && !special && dest.ts &&
           (Date.now() - Number(dest.ts) > PUSH_FRESH_MS);
+        hudNote('push', { seq: d.destSeq, stale: !!stale,
+          ageS: dest.ts ? Math.round((Date.now() - Number(dest.ts)) / 1000) : null,
+          hasU: !!(dest.u || (dest.videos && dest.videos[0] && dest.videos[0].u)) });
         if (!stale) applyPush(dest);
       }
     })
