@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		066B9BAB5A05541B98E391FF /* WebScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F87605535F4847E7B1312D25 /* WebScreen.swift */; };
+		0C4211A83ED4E18F06196A6C /* GlassTubeShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DF51F7A6F021906A1AD60107 /* GlassTubeShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		14F7E1793AC4CD43968C3BC3 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DD826BE527C494B28792F14 /* Theme.swift */; };
 		4A59E8217E4525079E45A7DC /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A591E4992CBDCDE3270B2C30 /* SettingsView.swift */; };
 		531F61128C90FA48F1D3DD1D /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BF13FEAAD4CF28C9AFED65B /* Store.swift */; };
@@ -16,6 +17,7 @@
 		7340B91119CC980162413EF6 /* ListsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FB146EDB1FDE26D142F3B47 /* ListsView.swift */; };
 		7545944CD64C5E06C89CEA1D /* SendView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9741BA4AECB0572CEAA9C7F9 /* SendView.swift */; };
 		772F36B9EF37DC376682E1B8 /* AccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D0CEE6DF2E300CD5307C0D4 /* AccountView.swift */; };
+		8A3AD787DAAC0C29040469FD /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BBC6E35B2ABACE1957A1225 /* ShareViewController.swift */; };
 		930B4E8530714A31E6BEE723 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 008711F51FE8347D2230929C /* LibraryView.swift */; };
 		BCA1A075D1385517F29347E8 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66F206713F798BD6322864D0 /* Components.swift */; };
 		DA135C50235EE81A8801BFE7 /* GlassesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8666BD399953D69F7C928312 /* GlassesView.swift */; };
@@ -27,6 +29,30 @@
 		EDF31F5F4E87D82A44A5CC4E /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF685E60886879D8154E933 /* SearchView.swift */; };
 		FE77004DBE88E2556BDE3776 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = E123E4E482E28EB1508DC684 /* Models.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		34E5B060F52BBE6641098241 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0A0C7ADB1C484AFE8FC34F28 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 960B584ACDD8975785A7BCC4;
+			remoteInfo = GlassTubeShare;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		00A3DAB9C33B6DA9960FF6A2 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0C4211A83ED4E18F06196A6C /* GlassTubeShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		008711F51FE8347D2230929C /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
@@ -40,14 +66,17 @@
 		3AADB95E9895C6E0E330BA18 /* API.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = API.swift; sourceTree = "<group>"; };
 		3E607F0C03F41F706612CAE3 /* GlassTubeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassTubeApp.swift; sourceTree = "<group>"; };
 		445129018490C1EB90E90A90 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		4BBC6E35B2ABACE1957A1225 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		66F206713F798BD6322864D0 /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		8666BD399953D69F7C928312 /* GlassesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassesView.swift; sourceTree = "<group>"; };
 		8FB146EDB1FDE26D142F3B47 /* ListsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListsView.swift; sourceTree = "<group>"; };
+		9661E186677803919DDDC411 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		9741BA4AECB0572CEAA9C7F9 /* SendView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SendView.swift; sourceTree = "<group>"; };
 		A591E4992CBDCDE3270B2C30 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		ACF685E60886879D8154E933 /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 		C4939B1E2F1AE0E55FA86A35 /* GlassTube.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GlassTube.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D55F3DC9FEF590A495F153F8 /* GoogleAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleAuth.swift; sourceTree = "<group>"; };
+		DF51F7A6F021906A1AD60107 /* GlassTubeShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = GlassTubeShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		E123E4E482E28EB1508DC684 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		F87605535F4847E7B1312D25 /* WebScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebScreen.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -57,6 +86,7 @@
 			isa = PBXGroup;
 			children = (
 				8829CA5D791450D4406D6C29 /* GlassTube */,
+				7E906837E025361DFA0619A5 /* GlassTubeShare */,
 				649014EF1F196A6A203942CA /* Products */,
 			);
 			sourceTree = "<group>";
@@ -65,8 +95,18 @@
 			isa = PBXGroup;
 			children = (
 				C4939B1E2F1AE0E55FA86A35 /* GlassTube.app */,
+				DF51F7A6F021906A1AD60107 /* GlassTubeShare.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		7E906837E025361DFA0619A5 /* GlassTubeShare */ = {
+			isa = PBXGroup;
+			children = (
+				9661E186677803919DDDC411 /* Info.plist */,
+				4BBC6E35B2ABACE1957A1225 /* ShareViewController.swift */,
+			);
+			path = GlassTubeShare;
 			sourceTree = "<group>";
 		};
 		8829CA5D791450D4406D6C29 /* GlassTube */ = {
@@ -105,10 +145,12 @@
 			buildPhases = (
 				014DBDD0092A0A2C6DA73B92 /* Sources */,
 				F759FBB85F0FFC82FED6EF55 /* Resources */,
+				00A3DAB9C33B6DA9960FF6A2 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				352E226B61C6A59EA4670CFA /* PBXTargetDependency */,
 			);
 			name = GlassTube;
 			packageProductDependencies = (
@@ -116,6 +158,23 @@
 			productName = GlassTube;
 			productReference = C4939B1E2F1AE0E55FA86A35 /* GlassTube.app */;
 			productType = "com.apple.product-type.application";
+		};
+		960B584ACDD8975785A7BCC4 /* GlassTubeShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 45C41507F1228AA10916C8E4 /* Build configuration list for PBXNativeTarget "GlassTubeShare" */;
+			buildPhases = (
+				88D8960D243EADDDF7901088 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = GlassTubeShare;
+			packageProductDependencies = (
+			);
+			productName = GlassTubeShare;
+			productReference = DF51F7A6F021906A1AD60107 /* GlassTubeShare.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -127,6 +186,10 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					0957220FA055C7A27A63A973 = {
+						DevelopmentTeam = N7LRRN2YGY;
+						ProvisioningStyle = Automatic;
+					};
+					960B584ACDD8975785A7BCC4 = {
 						DevelopmentTeam = N7LRRN2YGY;
 						ProvisioningStyle = Automatic;
 					};
@@ -147,6 +210,7 @@
 			projectRoot = "";
 			targets = (
 				0957220FA055C7A27A63A973 /* GlassTube */,
+				960B584ACDD8975785A7BCC4 /* GlassTubeShare */,
 			);
 		};
 /* End PBXProject section */
@@ -188,7 +252,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		88D8960D243EADDDF7901088 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8A3AD787DAAC0C29040469FD /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		352E226B61C6A59EA4670CFA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 960B584ACDD8975785A7BCC4 /* GlassTubeShare */;
+			targetProxy = 34E5B060F52BBE6641098241 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		528E3C8EBC39560694116E59 /* Debug */ = {
@@ -262,7 +342,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = N7LRRN2YGY;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = GlassTube/Info.plist;
@@ -270,7 +350,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mikeshobes.glasstube;
 				PRODUCT_NAME = GlassTube;
 				SDKROOT = iphoneos;
@@ -284,7 +364,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = N7LRRN2YGY;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = GlassTube/Info.plist;
@@ -292,13 +372,34 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mikeshobes.glasstube;
 				PRODUCT_NAME = GlassTube;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
+		};
+		83ADBC8781CFE864860456D3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 35;
+				DEVELOPMENT_TEAM = N7LRRN2YGY;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = GlassTubeShare/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mikeshobes.glasstube.share;
+				PRODUCT_NAME = GlassTubeShare;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
 		};
 		AC008AA8B054C33955459B0D /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -358,9 +459,39 @@
 			};
 			name = Release;
 		};
+		E4AA1548BC8103FD3A068AEF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 35;
+				DEVELOPMENT_TEAM = N7LRRN2YGY;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = GlassTubeShare/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mikeshobes.glasstube.share;
+				PRODUCT_NAME = GlassTubeShare;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		45C41507F1228AA10916C8E4 /* Build configuration list for PBXNativeTarget "GlassTubeShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E4AA1548BC8103FD3A068AEF /* Debug */,
+				83ADBC8781CFE864860456D3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		527DF7E9AB9CB78FFCE62A1D /* Build configuration list for PBXProject "GlassTube" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

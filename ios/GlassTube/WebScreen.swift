@@ -1329,6 +1329,7 @@ enum StreamResolver {
         lock.unlock()
         log("attach start")
         defer { finishUnlock() }
+        noteAddress()
         if var videos = payload["videos"] as? [[String: Any]] {
             let n = min(videos.count, 8)
             for i in 0..<n {
@@ -1421,9 +1422,21 @@ enum StreamResolver {
         if !hasFile {
             out["fileError"] = wasSkip()
                 ? "You cancelled YouTube. Send again, sign in, then wait for Play. Do not tap Cancel send."
+                : vpnOn()
+                ? "A VPN is on. YouTube blocks VPN addresses, and the glasses cannot play a file fetched through one. Turn the VPN off and send again."
                 : "Sent, but YouTube would not hand this phone a file. The glasses will still try their own routes. Stay on WiFi and send again if nothing plays."
         }
         return out
+    }
+
+    /// A VPN gets this phone bot-checked, and even a file it did get would be
+    /// signed for the VPN's address rather than the WiFi the glasses are on.
+    static func vpnOn() -> Bool {
+        guard let all = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any],
+              let scoped = all["__SCOPED__"] as? [String: Any] else { return false }
+        return scoped.keys.contains { k in
+            ["utun", "ipsec", "ppp", "tap", "tun"].contains { k.hasPrefix($0) }
+        }
     }
 
     static func isPlayableFile(_ raw: String?) -> Bool {
@@ -1515,6 +1528,19 @@ enum StreamResolver {
         return value
     }
 
+    /// YouTube's bot check is per address, and this phone can reach it over
+    /// IPv6 on an address no other device here shares. Reporting which one
+    /// it used is what tells "this phone is flagged" from "YouTube changed".
+    private static func noteAddress() {
+        guard let probe = URL(string: "https://api64.ipify.org") else { return }
+        session.dataTask(with: probe) { data, _, _ in
+            let ip = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            let scoped = (CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any])?["__SCOPED__"] as? [String: Any]
+            note(["id": "addr", "ip": ip, "v6": ip.contains(":"), "vpn": vpnOn(),
+                  "ifs": (scoped?.keys.sorted() ?? []).joined(separator: ",")])
+        }.resume()
+    }
+
     private static func note(_ payload: [String: Any]) {
         guard let endpoint = URL(string: "https://glasstube.vercel.app/api/watch") else { return }
         var req = URLRequest(url: endpoint)
@@ -1585,6 +1611,7 @@ enum StreamResolver {
         let sem = DispatchSemaphore(value: 0)
         var result: String?
         var play = ""
+        var reason = ""
         var http = 0
         session.dataTask(with: req) { data, resp, _ in
             defer { sem.signal() }
@@ -1593,6 +1620,7 @@ enum StreamResolver {
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else { return }
             play = String((json["playabilityStatus"] as? [String: Any])?["status"] as? String ?? "")
+            reason = String(((json["playabilityStatus"] as? [String: Any])?["reason"] as? String ?? "").prefix(80))
             let streaming = json["streamingData"] as? [String: Any]
             let formats = (streaming?["formats"] as? [[String: Any]] ?? [])
                 + (streaming?["adaptiveFormats"] as? [[String: Any]] ?? [])
@@ -1600,7 +1628,7 @@ enum StreamResolver {
         }.resume()
         _ = sem.wait(timeout: .now() + 10)
         log("\(client) play=\(play) http=\(http) len=\(result?.count ?? 0)")
-        note(["id": id, "client": client, "play": play, "http": http, "ok": isPlayableFile(result)])
+        note(["id": id, "client": client, "play": play, "reason": reason, "http": http, "ok": isPlayableFile(result)])
         return isPlayableFile(result) ? result : nil
     }
 

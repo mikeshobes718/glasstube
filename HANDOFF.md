@@ -207,3 +207,18 @@ Web icons went to `?v=4` so the Meta drawer refetches.
 2026-09-14 Mac: iPhone app rewritten in SwiftUI (2.0/28), new icon on both iOS and the Meta drawer, feed caching for YouTube's bursty RSS.
 2026-09-14 Mac: Liquid Glass redesign, light/dark/system with per-scheme accents, real Settings tab, iOS 2.1 (29), target raised to iOS 26.
 2026-09-14 Mac: icon redone in YouTube red across iOS and the web set, app accent defaults to match, iOS 2.1 (30).
+
+### Share from YouTube, 2026-09-24
+
+iPhone app **2.2 (33)**, installed. New `GlassTubeShare` share extension
+(`ios/GlassTubeShare/`, bundle `com.mikeshobes.glasstube.share`). It sends
+nothing itself: the resolver needs the app's WKWebView, its unlock screen and
+the LAN relay. It finds the link and opens `glasstube://send?url=…`, which
+`RootView.onOpenURL` already sends to the glasses. If iOS ever stops letting
+extensions open their app, it copies the link and says to tap Paste.
+
+Build and install with `ios/install.sh`. Xcode has no Apple ID here, and the
+wildcard profile cannot carry Sign In with Apple (added with the Berth work),
+so the script builds unsigned and signs with the ASC-made profiles in
+`ios/signing/` (gitignored). The signing cert expires 2027-07-24; remake them with
+`~/Documents/Cook/scripts/asc.py` and the key in `~/Documents/Keys/.env`.

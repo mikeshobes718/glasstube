@@ -11,3 +11,4 @@ ios/build/
 
 # Finder duplicates of the Xcode project, not real targets
 ios/GlassTube [0-9].xcodeproj/
+ios/signing/
