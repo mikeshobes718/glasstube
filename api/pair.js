@@ -1,5 +1,36 @@
 import { rpc, rpcConfigured, readBody, json } from './_rpc.js';
 
+/* Which device is actually polling. The phone's Glasses tab shows a live
+   HUD preview that polls exactly like the glasses do, so a poll alone does not
+   prove the glasses are listening. Logged at most every 30s per instance. */
+let lastUaLog = 0;
+function noteAgent(req, code, out) {
+  if (Date.now() - lastUaLog < 30000) return;
+  lastUaLog = Date.now();
+  const dest = (out && out.dest) || {};
+  console.log('[glasstube-poller]', JSON.stringify({
+    key: String(code).slice(0, 6), len: String(code).length,
+    ok: !!(out && out.ok), paired: !!(out && out.paired), seq: out && out.destSeq,
+    dest: (dest.videos && dest.videos[0] && dest.videos[0].id) || dest.id || '', hasTs: !!dest.ts,
+    ua: String(req.headers['user-agent'] || '').slice(0, 60),
+  }));
+}
+
+/* The HUD skips a push older than 10 minutes so a forgotten tab stays quiet,
+   but it judged that against its own clock, and the glasses' clock is not
+   ours: a skewed one made every push look old, acked and silently dropped.
+   The server's clock wrote ts, so the server decides. A fresh push goes out
+   without ts, which every HUD build reads as "play it". */
+const PUSH_FRESH_MS = 10 * 60 * 1000;
+function judgeFresh(out) {
+  const dest = out && out.dest;
+  if (dest && dest.ts && Date.now() - Number(dest.ts) < PUSH_FRESH_MS) {
+    out.dest = Object.assign({}, dest);
+    delete out.dest.ts;
+  }
+  return out;
+}
+
 export default async function handler(req, res) {
   if (!rpcConfigured()) {
     return json(res, 200, { ok: false, error: 'Phone pairing is not configured on the server.' });
@@ -8,11 +39,14 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const code = req.query.code;
       if (!code) return json(res, 400, { ok: false, error: 'code required' });
-      return json(res, 200, await rpc('glasstube_poll', { p_code: code }));
+      const polled = judgeFresh(await rpc('glasstube_poll', { p_code: code }));
+      noteAgent(req, code, polled);
+      return json(res, 200, polled);
     }
     if (req.method === 'POST') {
       const body = (await readBody(req)) || {};
       if (body.code && body.ack != null) {
+        console.log('[glasstube-ack]', JSON.stringify({ seq: Number(body.ack) }));
         await rpc('glasstube_ack', { p_code: body.code, p_seq: Number(body.ack) });
         return json(res, 200, { ok: true });
       }
