@@ -75,16 +75,9 @@ html, body {
   justify-content: center;
   background: #000;
   opacity: 1;
-  transition: opacity 600ms ease;
+  transition: opacity 200ms ease;
 }
 .splash-out { opacity: 0; pointer-events: none; }
-.splash-icon {
-  width: 96px;
-  height: 68px;
-  border-radius: 18px;
-  object-fit: cover;
-  box-shadow: 0 0 0 0 transparent;
-}
 .splash .yt-mark {
   width: 96px;
   height: 68px;
@@ -133,6 +126,21 @@ html, body {
   font-size: 22px;
   font-weight: 700;
 }
+
+/* WP1: launch stamp. The build shows on Home at launch, then fades. */
+.build-chip {
+  margin-left: auto;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: #aaafb9;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity 400ms cubic-bezier(.6,0,.4,1);
+  pointer-events: none;
+}
+.build-chip.chip-out { opacity: 0; }
 
 .title-icon {
   width: 36px;

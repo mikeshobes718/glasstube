@@ -20,7 +20,33 @@ const DEFAULT_CHANNELS = [
 const MAX_LIST = 40;
 const CHANNEL_PAGE = 8;
 const MAX_RECENTS = 24;
-const PAIR_POLL_MS = 2000;
+/* Pairing poll (WP1). One request in flight at a time, each aborted after
+   POLL_TIMEOUT_MS. The gap follows the wearer: fast while they are active or
+   on From iPhone, slower when idle, slow but never stopped when the page says
+   it is hidden (whether the glasses report hidden truthfully is unverified). */
+const POLL_ACTIVE_MS = 2000;
+const POLL_IDLE_MS = 5000;
+const POLL_HIDDEN_MS = 15000;
+const POLL_TIMEOUT_MS = 8000;
+const POLL_BACKOFF_MS = [2000, 4000, 8000, 15000];
+const POLL_NOW_MS = 100;
+const POLL_FRESH_MS = 1000;
+const ACTIVE_WINDOW_MS = 180000;
+const WATCHDOG_MS = 10000;
+const WATCHDOG_STALL_MS = 30000;
+/* A link is wiped only after GONE_STRIKES dead answers spanning GONE_SPAN_MS. */
+const GONE_STRIKES = 3;
+const GONE_SPAN_MS = 30000;
+/* Self-update: reload into a new deploy only on idle Home or on resume. */
+const UPDATE_IDLE_MS = 20000;
+const UPDATE_PUSH_QUIET_MS = 60000;
+const UPDATE_RETRY_MS = 10 * 60 * 1000;
+const UPDATE_CHECK_MS = 5000;
+const RELOADED_FOR_KEY = 'glasstube.reloadedFor';
+const UPDATED_FROM_KEY = 'glasstube.updatedFrom';
+const BUILD_CHIP_MS = 3000;
+const UNLINK_ARM_MS = 4000;
+const PAIR_NEW_LABEL = 'Link a different phone';
 const RETRY_MS = 3000;
 const PUSH_FRESH_MS = 10 * 60 * 1000;
 const ROUTE_KEY = 'glasstube.route';
@@ -85,6 +111,27 @@ let library = null;
 let libraryErr = '';
 let lastQuery = '';
 let phoneApp = '';
+/* Poll loop and self-update state (WP1). lastKeyAt and lastActiveAt are the
+   shared activity clocks: any keydown, becoming visible and an applied push
+   move them. */
+let pollBusy = false;
+let pollAgain = false;
+let pollDueAt = 0;
+let pollStartedAt = 0;
+let pollCtrl = null;
+let pollFails = 0;
+let lastPoll = { at: 0, ok: false, text: 'not yet' };
+let lastActiveAt = Date.now();
+let lastKeyAt = Date.now();
+let lastPushAt = 0;
+let goneStrikes = 0;
+let goneFirstAt = 0;
+let pairSeqKey = '';
+let serverBuild = '';
+let updatePending = '';
+let updatedFrom = '';
+let unlinkArmed = 0;
+const instanceId = (Math.random().toString(36) + '000000').slice(2, 8);
 
 function report(text) {
   if (window.glasstubeReport) window.glasstubeReport(text);
@@ -218,6 +265,16 @@ function pairCodeStore(c) {
     if (c) localStorage.setItem(PAIR_KEY, c);
     else localStorage.removeItem(PAIR_KEY);
   } catch (e) { /* optional */ }
+  pairKeyChanged();
+}
+
+/* destSeq belongs to one pairing key. When the key changes, the last seq seen
+   under the old key means nothing, so the next push is judged afresh. */
+function pairKeyChanged() {
+  const k = pairKey();
+  if (k === pairSeqKey) return;
+  pairSeqKey = k;
+  pairLastSeq = -1;
 }
 
 /* The six character code is a bootstrap and expires on purpose. The link token
@@ -235,6 +292,7 @@ function linkStore(t) {
     if (pairLink) localStorage.setItem(LINK_KEY, pairLink);
     else localStorage.removeItem(LINK_KEY);
   } catch (e) { /* optional */ }
+  pairKeyChanged();
 }
 
 function pairKey() {
@@ -932,6 +990,8 @@ function playPrev() {
    only as something the wearer chooses from the error screen. */
 function applyPush(dest) {
   if (!dest) return;
+  lastPushAt = Date.now();
+  lastActiveAt = lastPushAt;
   if (dest.kind === 'session') {
     sessionStore(dest.session || '');
     library = null;
@@ -1480,16 +1540,93 @@ function newPairCode() {
     });
 }
 
+/* The poll loop is a setTimeout chain, not an interval: pollPair schedules
+   the next request only when the current one has finished, so at most one is
+   ever in flight. It runs whenever there is a key, link token or code. */
 function startPairPoll() {
   stopPairPoll();
-  if (!pairCode) return;
+  if (!pairKey()) return;
   pollPair();
-  pairTimer = setInterval(pollPair, PAIR_POLL_MS);
 }
 
 function stopPairPoll() {
-  if (pairTimer) clearInterval(pairTimer);
+  if (pairTimer) clearTimeout(pairTimer);
   pairTimer = null;
+  pollDueAt = 0;
+}
+
+/* Glasses or the phone's own HUD preview, for the server log and delivery. */
+function pollWho() {
+  const hook = !!(window.webkit && window.webkit.messageHandlers &&
+    window.webkit.messageHandlers.glasstube);
+  return (hook || /iPhone|iPad/i.test(navigator.userAgent)) ? 'preview' : 'hud';
+}
+
+function pollDelay() {
+  if (document.hidden) return POLL_HIDDEN_MS;
+  if (current === 'phone' || Date.now() - lastActiveAt < ACTIVE_WINDOW_MS) return POLL_ACTIVE_MS;
+  return POLL_IDLE_MS;
+}
+
+/* After a network or HTTP failure: 2s, 4s, 8s, then 15s, never faster than
+   the cadence the wearer's state already asks for. */
+function nextPollDelay() {
+  if (!pollFails) return pollDelay();
+  const back = POLL_BACKOFF_MS[Math.min(pollFails, POLL_BACKOFF_MS.length) - 1];
+  return Math.max(pollDelay(), back);
+}
+
+function schedulePoll(ms) {
+  if (pairTimer) clearTimeout(pairTimer);
+  pairTimer = null;
+  pollDueAt = 0;
+  if (!pairKey()) return;
+  const wait = Math.max(0, ms == null ? nextPollDelay() : ms);
+  pollDueAt = Date.now() + wait;
+  pairTimer = setTimeout(function () {
+    pairTimer = null;
+    pollDueAt = 0;
+    pollPair();
+  }, wait);
+}
+
+/* Poll as soon as possible. Resume events (visible, pageshow, focus, online)
+   tend to arrive together; the short delay folds them into one request, and a
+   request that started under a second ago already counts. */
+function pollNow() {
+  if (!pairKey()) return;
+  if (pollBusy) {
+    if (Date.now() - pollStartedAt > POLL_FRESH_MS) pollAgain = true;
+    return;
+  }
+  if (pairTimer && pollDueAt - Date.now() <= POLL_NOW_MS) return;
+  schedulePoll(POLL_NOW_MS);
+}
+
+/* The wearer just did something: a long idle wait shrinks to the active
+   cadence instead of running out first. */
+function pollSoonerIfIdle() {
+  if (pollBusy || !pairKey()) return;
+  const want = nextPollDelay();
+  if (!pairTimer || pollDueAt - Date.now() > want) schedulePoll(want);
+}
+
+/* Every 10s: if no poll has started for 30s while visible, the chain broke
+   somewhere. Abort a request stuck past its own timeout and start again. */
+function pollWatchdog() {
+  if (document.hidden || !pairKey()) return;
+  const since = Date.now() - pollStartedAt;
+  if (pollBusy) {
+    if (since > POLL_TIMEOUT_MS + 5000) {
+      if (pollCtrl) pollCtrl.abort();
+      else { pollBusy = false; schedulePoll(0); }
+    }
+    return;
+  }
+  if (since > WATCHDOG_STALL_MS) {
+    hudNote('poll-restart', { since: Math.round(since / 1000) });
+    schedulePoll(0);
+  }
 }
 
 /* What the HUD did with a push, posted to the server log next to the phone's
@@ -1509,20 +1646,59 @@ function hudNote(ev, extra) {
   } catch (e) { /* diagnostics only */ }
 }
 
+/* The one place a poll response is handled. Single flight: a call while a
+   request is out only asks for another one right after it. */
 function pollPair() {
-  if (!pairKey()) return;
-  fetch('/api/pair?code=' + encodeURIComponent(pairKey()))
-    .then(r => r.json())
+  const key = pairKey();
+  if (!key) return;
+  if (pollBusy) { pollAgain = true; return; }
+  if (pairTimer) clearTimeout(pairTimer);
+  pairTimer = null;
+  pollDueAt = 0;
+  pairKeyChanged();
+  pollBusy = true;
+  pollAgain = false;
+  pollStartedAt = Date.now();
+  const ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+  pollCtrl = ctrl;
+  const timeout = setTimeout(function () { if (ctrl) ctrl.abort(); }, POLL_TIMEOUT_MS);
+  const url = '/api/pair?code=' + encodeURIComponent(key) +
+    '&b=' + encodeURIComponent(window.GLASSTUBE_BUILD || '') +
+    '&i=' + instanceId + '&who=' + pollWho();
+  let answered = false;
+  fetch(url, ctrl ? { signal: ctrl.signal } : {})
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
     .then(d => {
+      answered = true;
+      pollFails = 0;
+      // The key changed while this was out (unlink, new code): not ours.
+      if (key !== pairKey()) return;
+      d = d || {};
       if (!d.ok) {
-        const dead = /expir|not active|not found|unknown/i.test(d.error || '');
-        pairState = dead ? 'code expired' : (d.error || 'pair failed');
-        if (current === 'phone') {
-          $('#pair-help').textContent = dead
-            ? 'That code expired. Getting a new one...'
-            : (d.error || 'Could not reach pairing.');
+        const dead = d.gone === true || /expir|not active|not found|unknown/i.test(d.error || '');
+        // One dead answer is not proof: a server or database blip says the
+        // same. Wipe the link only after GONE_STRIKES answers over GONE_SPAN_MS.
+        if (dead) {
+          if (!goneStrikes) goneFirstAt = Date.now();
+          goneStrikes += 1;
         }
-        if (!dead) return;
+        const wipe = dead && goneStrikes >= GONE_STRIKES && Date.now() - goneFirstAt >= GONE_SPAN_MS;
+        pairState = wipe ? 'code expired'
+          : dead ? 'link not found · check ' + Math.min(goneStrikes, GONE_STRIKES) + '/' + GONE_STRIKES
+          : (d.error || 'pair failed');
+        lastPoll = { at: Date.now(), ok: false, text: pairState };
+        if (current === 'phone') {
+          $('#pair-help').textContent = wipe
+            ? 'That code expired. Getting a new one...'
+            : dead ? 'Checking your link…' : (d.error || 'Could not reach pairing.');
+        }
+        if (!wipe) return;
+        hudNote('pair-gone', { strikes: goneStrikes, error: String(d.error || '').slice(0, 80) });
+        goneStrikes = 0;
+        goneFirstAt = 0;
         stopPairPoll();
         pairCodeStore('');
         linkStore('');
@@ -1531,6 +1707,10 @@ function pollPair() {
         ensureListening();
         return;
       }
+      goneStrikes = 0;
+      goneFirstAt = 0;
+      lastPoll = { at: Date.now(), ok: true, text: d.paired ? 'ok · paired' : 'ok · waiting' };
+      noteServerBuild(d.build);
       setOffline(false);
       if (d.token && d.token !== pairLink) linkStore(d.token);
       if (d.code && d.code !== pairCode) {
@@ -1575,9 +1755,127 @@ function pollPair() {
       }
     })
     .catch(e => {
-      pairState = netText(e).slice(0, 48);
+      // A bug while handling a good answer is not the network going away.
+      if (answered) { report('JS error: poll · ' + String((e && e.message) || e).slice(0, 120)); return; }
+      if (key !== pairKey()) return;
+      pollFails += 1;
+      const timedOut = e && e.name === 'AbortError';
+      pairState = (timedOut ? 'no answer in ' + (POLL_TIMEOUT_MS / 1000) + 's' : netText(e)).slice(0, 48);
+      lastPoll = { at: Date.now(), ok: false, text: pairState };
       setOffline(true);
+    })
+    .then(function () {
+      clearTimeout(timeout);
+      if (pollCtrl === ctrl) pollCtrl = null;
+      pollBusy = false;
+      if (!pairKey()) return;
+      if (maybeUpdate()) return;
+      schedulePoll(pollAgain ? POLL_NOW_MS : nextPollDelay());
+      pollAgain = false;
     });
+}
+
+/* Self-update (WP1). The glasses keep this page alive for days, so a deploy
+   only lands if the page notices it is out of date. Every /api/pair answer
+   carries the deployed build (scripts/stamp.mjs); when it differs from ours,
+   reload at the next safe moment: idle on Home, or the moment the wearer
+   comes back to the app. Never in the player, never with search text typed,
+   never right after a push, and at most once per build (URL rv marker plus
+   localStorage reloadedFor), so a bad deploy cannot become a reload loop. */
+function urlRv() {
+  try { return new URL(location.href).searchParams.get('rv') || ''; }
+  catch (e) { return ''; }
+}
+
+function reloadedRecently(build) {
+  try {
+    const r = JSON.parse(localStorage.getItem(RELOADED_FOR_KEY) || 'null');
+    return !!(r && r.build === build && Date.now() - Number(r.at || 0) < UPDATE_RETRY_MS);
+  } catch (e) { return false; }
+}
+
+function updateAllowed() {
+  return !!updatePending && urlRv() !== updatePending && !reloadedRecently(updatePending);
+}
+
+function noteServerBuild(build) {
+  if (!build) return;
+  serverBuild = String(build);
+  if (serverBuild === String(window.GLASSTUBE_BUILD || '')) { updatePending = ''; return; }
+  if (updatePending === serverBuild) return;
+  updatePending = serverBuild;
+  // Already reloaded for this build and still behind: the reload did not take.
+  hudNote(updateAllowed() ? 'update-pending' : 'update-stuck',
+    { from: window.GLASSTUBE_BUILD || '', to: serverBuild });
+}
+
+function searchTextTyped() {
+  if (typeof typed === 'string' && typed.trim()) return true;
+  const field = document.querySelector('#screen-search input');
+  return !!(field && String(field.value || '').trim());
+}
+
+function pushIsFresh() {
+  if (lastPushAt && Date.now() - lastPushAt < UPDATE_PUSH_QUIET_MS) return true;
+  // A push WP4 holds while hidden plays before any reload.
+  return typeof pendingPush !== 'undefined' && !!pendingPush;
+}
+
+/* Idle path: after each poll and every UPDATE_CHECK_MS. */
+function maybeUpdate() {
+  if (!updateAllowed() || document.hidden || current !== 'home') return false;
+  if (Date.now() - lastKeyAt < UPDATE_IDLE_MS || pushIsFresh()) return false;
+  reloadForUpdate(updatePending);
+  return true;
+}
+
+/* Resume path: the wearer reopened the app. Reload before any input, unless
+   a video is up or they were typing a search. */
+function resumeUpdate() {
+  if (!updateAllowed() || document.hidden) return false;
+  if (current === 'player' || searchTextTyped() || pushIsFresh()) return false;
+  if (current !== 'home') show('home');
+  reloadForUpdate(updatePending);
+  return true;
+}
+
+function reloadForUpdate(build) {
+  try { progressSave(); } catch (e) { /* best effort */ }
+  try { sessionStorage.setItem(UPDATED_FROM_KEY, String(window.GLASSTUBE_BUILD || '?')); }
+  catch (e) { /* optional */ }
+  try { localStorage.setItem(RELOADED_FOR_KEY, JSON.stringify({ build: build, at: Date.now() })); }
+  catch (e) { /* optional */ }
+  stopPairPoll();
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('rv', build);
+    location.replace(u.toString());
+  } catch (e) {
+    // reloadedFor is already set, so this cannot loop: keep polling.
+    schedulePoll();
+  }
+}
+
+/* First thing after an update reload: say so, once, on the lens and in the
+   server log. A reload that landed on the same build gets no toast. */
+function noteUpdated() {
+  let from = '';
+  try {
+    from = sessionStorage.getItem(UPDATED_FROM_KEY) || '';
+    sessionStorage.removeItem(UPDATED_FROM_KEY);
+  } catch (e) { return; }
+  if (!from) return;
+  const to = String(window.GLASSTUBE_BUILD || '');
+  updatedFrom = from;
+  hudNote('updated', { from: from, to: to });
+  if (from === to) return;
+  const text = 'Updated · v' + to;
+  if (typeof showToast === 'function') { showToast(text, 'ok', 2500); return; }
+  // Until WP2's toast lane lands: the status line, cleared after 2.5s.
+  setStatus(text);
+  setTimeout(function () {
+    if ($('#status').textContent === text) setStatus('');
+  }, 2500);
 }
 
 /* Diagnostics the wearer can actually read back to someone. Every line is a
@@ -1589,7 +1887,16 @@ let selfTest = null;
 function debugLines() {
   const errs = window.glasstubeErrors || [];
   const out = [];
-  out.push(['App', 'v' + (window.GLASSTUBE_BUILD || '?')]);
+  out.push(['Build', 'v' + (window.GLASSTUBE_BUILD || '?')]);
+  out.push(['Server build', serverBuild ? 'v' + serverBuild : 'not seen yet',
+    serverBuild ? serverBuild === window.GLASSTUBE_BUILD : undefined]);
+  out.push(['Update', updateLine()]);
+  out.push(['Old version?', 'Middle-finger tap on the home screen, then Restart.']);
+  out.push(['Last poll', lastPoll.at
+    ? Math.round((Date.now() - lastPoll.at) / 1000) + 's ago · ' + lastPoll.text
+    : lastPoll.text, lastPoll.at ? lastPoll.ok : undefined]);
+  out.push(['Poll every', (nextPollDelay() / 1000) + 's' + (pollFails ? ' · retrying' : '')]);
+  out.push(['Instance', instanceId + ' · ' + pollWho()]);
   out.push(['Origin', String(window.location.origin || '?')]);
   out.push(['Viewport', window.innerWidth + 'x' + window.innerHeight]);
   out.push(['Online', navigator.onLine ? 'yes' : 'no', !!navigator.onLine]);
@@ -1620,6 +1927,15 @@ function debugLines() {
   return out;
 }
 
+function updateLine() {
+  if (updatePending) {
+    return updateAllowed() ? 'v' + updatePending + ' waiting for idle home'
+      : 'v' + updatePending + ' did not load · use Restart';
+  }
+  if (updatedFrom) return 'reloaded from v' + updatedFrom;
+  return 'none';
+}
+
 function renderDebug() {
   const rows = $('#debug-rows');
   rows.innerHTML = '';
@@ -1627,7 +1943,7 @@ function renderDebug() {
     const d = document.createElement('div');
     if (row[2] === true) d.className = 'debug-ok';
     if (row[2] === false) d.className = 'debug-bad';
-    d.textContent = row[0] + ': ' + row[1];
+    d.textContent = row[0] + (/\?$/.test(row[0]) ? ' ' : ': ') + row[1];
     rows.appendChild(d);
   });
   const errs = window.glasstubeErrors || [];
@@ -1785,12 +2101,54 @@ window.addEventListener('offline', () => setOffline(true));
 window.addEventListener('online', () => {
   setOffline(false);
   if (!pairCode) ensureListening();
+  pollNow();
 });
 
+/* Page lifecycle (WP1). The glasses keep this page for days and hide and show
+   it as the wearer comes and goes, so each return is a moment to catch up:
+   poll now, and if a new build is waiting, load it before any input. */
+function onResume() {
+  lastActiveAt = Date.now();
+  if (resumeUpdate()) return;
+  pollNow();
+}
+document.addEventListener('visibilitychange', function () {
+  if (!document.hidden) { onResume(); return; }
+  if (!pollBusy && pairKey()) schedulePoll(nextPollDelay());
+});
+let firstPageshow = true;
+window.addEventListener('pageshow', function (e) {
+  // The first pageshow is this page loading, not the wearer coming back.
+  if (firstPageshow && !e.persisted) { firstPageshow = false; return; }
+  firstPageshow = false;
+  onResume();
+});
+window.addEventListener('focus', function () { pollNow(); });
+// Any key is activity: it keeps the fast cadence and holds off an update reload.
+window.addEventListener('keydown', function () {
+  lastKeyAt = Date.now();
+  lastActiveAt = lastKeyAt;
+  pollSoonerIfIdle();
+}, true);
+
 $('#btn-phone-back').addEventListener('click', () => show('home'));
-// "New code" is how you hand the glasses to a different phone, so it has to
-// drop the durable link too, not just the six characters on screen.
+// "Link a different phone" is how you hand the glasses to a different phone,
+// so it has to drop the durable link too, not just the six characters on
+// screen. It takes two pinches: one stray pinch must not unpair the iPhone.
+function disarmUnlink() {
+  if (unlinkArmed) clearTimeout(unlinkArmed);
+  unlinkArmed = 0;
+  const btn = $('#btn-pair-new');
+  if (btn) btn.textContent = PAIR_NEW_LABEL;
+}
 $('#btn-pair-new').addEventListener('click', () => {
+  if (!unlinkArmed) {
+    $('#btn-pair-new').textContent = 'Pinch again to unlink your iPhone';
+    unlinkArmed = setTimeout(disarmUnlink, UNLINK_ARM_MS);
+    return;
+  }
+  disarmUnlink();
+  hudNote('unlink');
   stopPairPoll();
   pairCode = '';
   pairLastSeq = -1;
@@ -1871,27 +2229,35 @@ function ensureListening() {
   newPairCode();
 }
 
-if (typeof Player !== 'undefined' && Player.preload) Player.preload();
 sessionStore(sessionLoad());
 renderSettings();
 renderHome();
 if (prefs && prefs.sleep()) armSleep();
 ensureListening();
+setInterval(function () { if (!pollBusy) maybeUpdate(); }, UPDATE_CHECK_MS);
+setInterval(pollWatchdog, WATCHDOG_MS);
+
+/* Launch stamp: the build shows on Home for a few seconds after the splash,
+   so a deploy that reached the glasses can be seen to have landed. */
+function showBuildChip() {
+  const chip = $('#build-chip');
+  if (!chip) return;
+  chip.textContent = 'v' + (window.GLASSTUBE_BUILD || '?');
+  chip.classList.remove('chip-out');
+  setTimeout(function () { chip.classList.add('chip-out'); }, BUILD_CHIP_MS);
+}
 
 function hideSplash() {
   const splash = $('#splash');
   if (!splash || splash.classList.contains('splash-out')) return;
   splash.classList.add('splash-out');
-  setTimeout(function () { splash.classList.add('hidden'); }, 700);
+  setTimeout(function () { splash.classList.add('hidden'); }, 220);
   focusFirst();
   if (window.glasstubeFitStage) window.glasstubeFitStage();
 }
 
-const splashIcon = document.querySelector('.splash-icon');
-function holdThenHide() {
-  setTimeout(hideSplash, 900);
-}
-if (splashIcon && splashIcon.complete && splashIcon.naturalWidth) holdThenHide();
-else if (splashIcon) splashIcon.addEventListener('load', holdThenHide);
-else holdThenHide();
-setTimeout(hideSplash, 2600);
+setTimeout(function () {
+  hideSplash();
+  showBuildChip();
+  noteUpdated();
+}, 300);

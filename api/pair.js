@@ -1,15 +1,33 @@
 import { rpc, rpcConfigured, readBody, json } from './_rpc.js';
+import { BUILD } from './_build.js';
+
+/* Every GET carries the deployed build (scripts/stamp.mjs). A HUD that has
+   been alive on the glasses for days compares it with its own and reloads
+   itself at the next safe moment, so a deploy reaches the lens on its own. */
+function withBuild(out) {
+  return Object.assign({}, out, { build: BUILD });
+}
 
 /* Which device is actually polling. The phone's Glasses tab shows a live
    HUD preview that polls exactly like the glasses do, so a poll alone does not
-   prove the glasses are listening. Logged at most every 30s per instance. */
-let lastUaLog = 0;
+   prove the glasses are listening. The HUD sends its build (b), a per-page
+   instance id (i) and who it is (hud or preview). Logged at most every 30s per
+   pairing key, so one busy pair cannot hide another. */
+const POLL_LOG_MS = 30000;
+const lastUaLog = new Map();
 function noteAgent(req, code, out) {
-  if (Date.now() - lastUaLog < 30000) return;
-  lastUaLog = Date.now();
+  const key = String(code).slice(0, 6);
+  const now = Date.now();
+  if (now - (lastUaLog.get(key) || 0) < POLL_LOG_MS) return;
+  if (lastUaLog.size > 500) {
+    for (const [k, at] of lastUaLog) if (now - at >= POLL_LOG_MS) lastUaLog.delete(k);
+  }
+  lastUaLog.set(key, now);
+  const q = req.query || {};
   const dest = (out && out.dest) || {};
   console.log('[glasstube-poller]', JSON.stringify({
-    key: String(code).slice(0, 6), len: String(code).length,
+    key, len: String(code).length,
+    b: String(q.b || '').slice(0, 16), i: String(q.i || '').slice(0, 8), who: String(q.who || '').slice(0, 8),
     ok: !!(out && out.ok), paired: !!(out && out.paired), seq: out && out.destSeq,
     dest: (dest.videos && dest.videos[0] && dest.videos[0].id) || dest.id || '', hasTs: !!dest.ts,
     ua: String(req.headers['user-agent'] || '').slice(0, 60),
@@ -33,15 +51,16 @@ function judgeFresh(out) {
 
 export default async function handler(req, res) {
   if (!rpcConfigured()) {
-    return json(res, 200, { ok: false, error: 'Phone pairing is not configured on the server.' });
+    const out = { ok: false, error: 'Phone pairing is not configured on the server.' };
+    return json(res, 200, req.method === 'GET' ? withBuild(out) : out);
   }
   try {
     if (req.method === 'GET') {
       const code = req.query.code;
-      if (!code) return json(res, 400, { ok: false, error: 'code required' });
+      if (!code) return json(res, 400, withBuild({ ok: false, error: 'code required' }));
       const polled = judgeFresh(await rpc('glasstube_poll', { p_code: code }));
       noteAgent(req, code, polled);
-      return json(res, 200, polled);
+      return json(res, 200, withBuild(polled));
     }
     if (req.method === 'POST') {
       const body = (await readBody(req)) || {};
@@ -57,6 +76,7 @@ export default async function handler(req, res) {
     }
     return json(res, 405, { ok: false, error: 'GET or POST only' });
   } catch (e) {
-    return json(res, 200, { ok: false, error: String((e && e.message) || e) });
+    const out = { ok: false, error: String((e && e.message) || e) };
+    return json(res, 200, req.method === 'GET' ? withBuild(out) : out);
   }
 }
