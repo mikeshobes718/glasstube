@@ -851,3 +851,131 @@ body.hud-player .errbar { display: none !important; }
   color: #fff;
   box-shadow: 0 0 0 3px #fff;
 }
+
+/* WP4: link chip in the Home header. The dot or glyph carries the colour,
+   the word carries the meaning. */
+.link-chip {
+  margin-left: auto;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--t2, #cfd3d9);
+}
+.link-chip.link-off { color: var(--t3, #aaafb9); }
+.link-chip.link-on .chip-dot { color: var(--ok, #4ff08f); }
+.link-chip.link-err { color: var(--err, #ff7a70); }
+
+/* WP4: 'Missed from iPhone', the top Home row while a push waits. */
+#btn-missed .missed-tag {
+  display: block;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
+  color: var(--warn, #ffc24a);
+}
+#btn-missed .missed-title {
+  display: block;
+  width: 100%;
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#btn-missed small {
+  width: 100%;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  margin-top: 0;
+}
+
+/* WP4: From iPhone, linked and not linked. */
+.pair-linked {
+  width: 100%;
+  margin: 32px 0 0;
+  padding: 0 4px;
+  box-sizing: border-box;
+}
+.pair-linked-head {
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 700;
+  color: var(--t1, #fff);
+}
+.pair-ok { color: var(--ok, #4ff08f); }
+.pair-last {
+  margin-top: 20px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t2, #cfd3d9);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pair-linked-code {
+  margin-top: 12px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t3, #aaafb9);
+  font-variant-numeric: tabular-nums;
+}
+#screen-phone .pair-code {
+  font-size: 64px;
+  line-height: 72px;
+  font-weight: 800;
+  letter-spacing: 8px;
+  margin: 16px 0 8px;
+}
+#screen-phone .pair-help {
+  font-size: 24px;
+  line-height: 32px;
+  color: var(--t2, #cfd3d9);
+}
+#screen-phone .pair-steps {
+  margin-top: 16px;
+  padding-left: 40px;
+  box-sizing: border-box;
+  font-size: 24px;
+  line-height: 32px;
+  color: var(--t2, #cfd3d9);
+}
+.pair-foot {
+  margin-top: 20px;
+  padding: 0 4px;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--t3, #aaafb9);
+}
+
+/* WP4: interim toast. interim: WP2 provides the full version. The y 500-548
+   lane above the footer; the black backing only hides rows under it. */
+.toast {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 52px;
+  z-index: 35;
+  min-height: 48px;
+  padding: 8px 20px;
+  box-sizing: border-box;
+  background: #000;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  border-radius: 24px;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  color: #fff;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.toast.toast-err { color: var(--err, #ff7a70); }

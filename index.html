@@ -114,8 +114,10 @@ window.addEventListener('unhandledrejection', function (e) {
   <header class="yt-head">
     <span class="yt-mark" aria-hidden="true"></span>
     <h1 class="title title-home">GlassTube</h1>
+    <span id="link-chip" class="link-chip link-off"><span class="chip-dot">○</span> Not linked</span>
   </header>
   <div class="list list-home screen-body">
+    <button class="focusable menu-btn hidden" id="btn-missed" data-menu="missed"><span class="missed-tag">! Missed from iPhone</span><span id="missed-title" class="missed-title"></span><small id="missed-sub"></small></button>
     <button class="focusable menu-btn hidden" id="btn-continue" data-menu="continue">Continue<small id="continue-sub"></small></button>
     <button class="focusable menu-btn hidden" data-menu="queue">Queue<small></small></button>
     <button class="focusable menu-btn" data-menu="search">Search<small>Type with the band, play here</small></button>
@@ -176,6 +178,11 @@ window.addEventListener('unhandledrejection', function (e) {
 <section id="screen-phone" class="screen hidden">
   <h2 class="title">From iPhone</h2>
   <div class="screen-body">
+    <div id="pair-linked" class="pair-linked hidden">
+      <div class="pair-linked-head"><span class="pair-ok">✓</span> Linked to your iPhone</div>
+      <div id="pair-last" class="pair-last"></div>
+      <div id="pair-linked-code" class="pair-linked-code"></div>
+    </div>
     <div id="pair-code" class="pair-code">------</div>
     <div id="pair-help" class="pair-help">Getting a code...</div>
     <ol id="pair-steps" class="pair-steps">
@@ -183,9 +190,10 @@ window.addEventListener('unhandledrejection', function (e) {
       <li>Type this code</li>
       <li>Paste a YouTube link and send</li>
     </ol>
+    <div class="pair-foot">Old version? Middle-finger tap on Home, then Restart.</div>
   </div>
   <div class="list back-row">
-    <button class="focusable menu-btn" id="btn-pair-new">New code</button>
+    <button class="focusable menu-btn" id="btn-pair-new">Link a different phone</button>
     <button class="focusable back-btn" id="btn-phone-back">Back <span class="back-hint">swipe left</span></button>
   </div>
 </section>
@@ -219,6 +227,7 @@ window.addEventListener('unhandledrejection', function (e) {
 </section>
 
 <div id="status" class="status hidden"></div>
+<div id="toast" class="toast hidden"></div>
 
 <script src="/sound.js?v=7"></script>
 <script src="/prefs.js?v=7"></script>
