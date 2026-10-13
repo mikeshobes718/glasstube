@@ -283,6 +283,7 @@ async function runPlayback(browser, fileUrl) {
 
     const wired = await page.evaluate(() => ({
       menus: [...document.querySelectorAll('#screen-home [data-menu]')].map(e => e.dataset.menu),
+      debug: !!document.querySelector('#screen-settings #btn-debug'),
       player: typeof Player !== 'undefined',
       routes: typeof Player !== 'undefined' ? Player.routes() : [],
     }));
@@ -291,15 +292,19 @@ async function runPlayback(browser, fileUrl) {
     } else {
       bad('route chain', JSON.stringify(wired.routes));
     }
-    if (wired.menus.includes('search') && wired.menus.includes('debug')) ok('home menu wired');
+    // Diagnostics lives at the bottom of Settings now, not on Home.
+    if (wired.menus.includes('search') && wired.debug) ok('home menu wired');
     else bad('home menu', wired.menus.join(','));
 
     // Back has to be reachable with nothing but the D-pad, or the search grid
     // traps the wearer: the glasses keep their own back gesture.
     await page.evaluate(() => document.querySelector('[data-menu="search"]').click());
     await page.waitForTimeout(250);
-    for (let i = 0; i < 4; i++) { await page.keyboard.press('ArrowDown'); await page.waitForTimeout(50); }
+    // The HUD's input arbiter folds the same key inside 120ms into one gesture
+    // and ignores Enter for 320ms after a swipe, so space the presses out.
+    for (let i = 0; i < 4; i++) { await page.keyboard.press('ArrowDown'); await page.waitForTimeout(200); }
     const onKey = await page.$eval('.kb-key.kb-on', e => e.textContent);
+    await page.waitForTimeout(400);
     await page.keyboard.press('Enter');
     await page.waitForTimeout(300);
     const screen = await page.evaluate(() =>

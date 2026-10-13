@@ -851,3 +851,74 @@ body.hud-player .errbar { display: none !important; }
   color: #fff;
   box-shadow: 0 0 0 3px #fff;
 }
+
+/* WP3: navigation footer, list counter, row loading, press, input test */
+.nav-foot {
+  position: absolute;
+  left: 24px;
+  top: 556px;
+  height: 24px;
+  z-index: 5;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--t3, #aaafb9);
+  pointer-events: none;
+}
+
+.list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.list-head .title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.list-count {
+  flex: 0 0 auto;
+  margin-right: 4px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t3, #aaafb9);
+  font-variant-numeric: tabular-nums;
+}
+
+.pressed { transform: scale(.97); transition: transform 120ms cubic-bezier(.6, 0, .4, 1); }
+
+.row-load {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t2, #cfd3d9);
+}
+.row-spin {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, .28);
+  border-top-color: #fff;
+  box-sizing: border-box;
+  animation: row-spin 800ms linear infinite;
+}
+@keyframes row-spin { to { transform: rotate(360deg); } }
+
+.input-log {
+  width: 100%;
+  padding: 0 4px 8px;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--t2, #cfd3d9);
+  font-variant-numeric: tabular-nums;
+}
+.input-log-head { color: #fff; font-weight: 700; margin-bottom: 4px; }
+.input-log-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
