@@ -438,6 +438,41 @@ body.hud-player .errbar { display: none !important; }
 #yt-poster.hidden { display: none !important; }
 
 #yt-wrap.audio-only #yt-slot { visibility: hidden; }
+
+/* WP5: one persistent <video> for the file and proxy routes */
+#yt-video-slot,
+#yt-video {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 600px;
+  height: 338px;
+  border: 0;
+  pointer-events: none;
+  object-fit: contain;
+  background: #000;
+}
+#yt-video-slot.hidden { display: none !important; }
+#yt-wrap.audio-only #yt-video-slot { visibility: hidden; }
+
+/* WP5: interim toast lane (WP2 owns the full #toast style; keep one) */
+.toast {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 500px;
+  z-index: 25;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  color: #fff;
+  pointer-events: none;
+}
 #yt-wrap.audio-only #yt-poster { display: block !important; opacity: 1; }
 
 .load-gate,

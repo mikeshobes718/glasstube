@@ -137,7 +137,8 @@ window.addEventListener('unhandledrejection', function (e) {
 
 <section id="screen-player" class="screen screen-flush hidden">
   <div id="yt-wrap">
-    <div id="yt-slot"><iframe id="yt-host" src="about:blank" referrerpolicy="origin" allow="autoplay; encrypted-media; picture-in-picture" tabindex="-1"></iframe></div>
+    <div id="yt-slot"><iframe id="yt-host" src="about:blank" referrerpolicy="origin" allow="autoplay; encrypted-media; picture-in-picture" tabindex="-1" aria-hidden="true"></iframe></div>
+    <div id="yt-video-slot" class="hidden"><video id="yt-video" playsinline webkit-playsinline disablepictureinpicture preload="auto" muted></video></div>
     <img id="yt-poster" alt="">
     <div id="player-bar"><div id="player-buffer"></div><div id="player-fill"></div></div>
     <div id="player-time">0:00 / 0:00</div>
@@ -219,11 +220,13 @@ window.addEventListener('unhandledrejection', function (e) {
 </section>
 
 <div id="status" class="status hidden"></div>
+<!-- interim (WP5): WP2 owns #toast and its styling; keep exactly one. -->
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
 <script src="/sound.js?v=7"></script>
 <script src="/prefs.js?v=7"></script>
-<script src="/player.js?v=25"></script>
-<script src="/app.js?v=36"></script>
+<script src="/player.js?v=26"></script>
+<script src="/app.js?v=37"></script>
 </div>
 </body>
 </html>
