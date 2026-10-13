@@ -1,18 +1,38 @@
-/* Matched to YouTube iOS Library / Watch later, and YouTube Music now playing.
-   https://mobbin.com/screens/4e5ec32c-c443-4a44-93c2-1657a8d0623c
-   https://mobbin.com/screens/4fa75cb4-ebb0-4164-b9b2-87bb22602f84
-   https://mobbin.com/screens/1bcd4d18-b613-4654-ae4e-82a53d4fdfd0 */
+/* GlassTube HUD for the Meta Ray-Ban Display: a 600x600 additive panel.
+   Black adds no light, so on the lens it is see-through; every colour here
+   is an amount of light. Design system: docs/hud-plan/PLAN.md. */
+
+/* WP2: design tokens. Nothing on the HUD uses a grey that is not one of these,
+   and no text is darker than --t3 (which is for hints only, 18px and up). */
+:root {
+  --bg: #000000;
+  --t1: #ffffff;
+  --t2: #cfd3d9;
+  --t3: #aaafb9;
+  --accent: #ff3d3d;
+  --ok: #4ff08f;
+  --warn: #ffc24a;
+  --err: #ff7a70;
+  --hair: rgba(255, 255, 255, 0.28);
+  --track: rgba(255, 255, 255, 0.22);
+  --buffer: rgba(255, 255, 255, 0.45);
+  --surface: #1c1e21;
+  --ease: cubic-bezier(0.6, 0, 0.4, 1);
+}
 
 html, body {
   margin: 0;
   padding: 0;
   width: 100%;
   height: 100%;
-  background: #000;
+  background: var(--bg);
   overflow: hidden;
-  color: #f1f1f1;
-  font-family: Roboto, 'YouTube Sans', -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+  color: var(--t1);
+  font-family: 'Noto Sans', Roboto, system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
 }
+
+button { font-family: inherit; }
 
 #stage {
   position: absolute;
@@ -21,10 +41,12 @@ html, body {
   width: 600px;
   height: 600px;
   overflow: hidden;
-  background: #000;
+  background: var(--bg);
   transform-origin: 0 0;
 }
 
+/* Zones: 0-24 system bar, 24-88 header, 88-552 content, 556-580 footer.
+   24px side inset, so content runs x 24-576. */
 .screen {
   position: relative;
   width: 600px;
@@ -32,7 +54,7 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  padding: 12px 16px 40px;
+  padding: 24px 24px 20px;
   box-sizing: border-box;
 }
 
@@ -41,7 +63,7 @@ html, body {
 .yt-mark {
   width: 36px;
   height: 26px;
-  background: #ff0000;
+  background: var(--accent);
   border-radius: 8px;
   position: relative;
   flex: 0 0 auto;
@@ -53,16 +75,17 @@ html, body {
   top: 6px;
   border-style: solid;
   border-width: 7px 0 7px 12px;
-  border-color: transparent transparent transparent #fff;
+  border-color: transparent transparent transparent var(--t1);
 }
 
 .yt-head {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 48px;
-  margin: 0 0 8px;
-  padding: 0 4px;
+  height: 64px;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
 }
 
 .splash {
@@ -96,57 +119,67 @@ html, body {
   border-width: 16px 0 16px 28px;
 }
 .splash-name {
-  margin-top: 22px;
-  font-size: 28px;
+  margin-top: 24px;
+  font-size: 32px;
+  line-height: 40px;
   font-weight: 700;
-  color: #fff;
+  color: var(--t1);
   letter-spacing: 0;
 }
 .splash-tag {
-  margin-top: 6px;
-  font-size: 16px;
-  font-weight: 400;
-  color: #c9c9c9;
+  margin-top: 8px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t2);
 }
 .splash-credit {
   position: absolute;
-  bottom: 28px;
-  font-size: 14px;
-  color: #c9c9c9;
+  bottom: 32px;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--t3);
 }
 
 .hidden { display: none !important; }
 
+/* Screen title: 32/40/700 in the 64px header band (y 24-88). */
 .title {
-  font-size: 22px;
+  flex: 0 0 auto;
+  height: 64px;
+  margin: 0;
+  padding: 12px 0;
+  box-sizing: border-box;
+  font-size: 32px;
+  line-height: 40px;
   font-weight: 700;
-  color: #fff;
-  margin: 4px 4px 14px;
+  color: var(--t1);
   letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .title-home {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  height: auto;
   margin: 0;
-  font-size: 22px;
-  font-weight: 700;
-}
-
-.title-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
+  padding: 0;
 }
 
 .list {
+  --gap: 4px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  gap: var(--gap);
 }
 
+/* The one scroll owner on each screen. position:relative makes it the
+   offsetParent of its rows, so reveal() can centre a row without measuring
+   the (possibly scaled) stage. */
 .screen-body {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -157,6 +190,7 @@ html, body {
   overflow-x: hidden;
   scrollbar-width: none;
   scroll-behavior: smooth;
+  scroll-padding: 24px 0;
 }
 
 .screen-body::-webkit-scrollbar { width: 0; height: 0; }
@@ -165,81 +199,60 @@ html, body {
    the fold gets flex-shrunk toward zero height and the screen looks empty. */
 .screen-body > * { flex: 0 0 auto; }
 
+/* Rows: label 28/36/600 in --t2 at rest, --t1 when focused. No fills and no
+   separators; the focus ring is the only state cue. */
 .menu-btn, .list-btn {
   width: 100%;
-  min-height: 56px;
+  min-height: 64px;
   margin: 0;
-  padding: 10px 12px;
-  font-size: 18px;
-  font-weight: 500;
-  color: #f1f1f1;
+  padding: 0 20px;
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 600;
+  color: var(--t2);
   background: transparent;
   border: 0;
-  border-radius: 0;
+  border-radius: 16px;
   text-align: left;
   cursor: pointer;
   box-sizing: border-box;
 }
 
+/* Home: 60px for a label, 80px with a status line. */
 .list-home .menu-btn {
-  min-height: 58px;
-  padding: 8px 12px;
-  font-size: 18px;
+  min-height: 60px;
+  padding: 8px 20px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
-  border-bottom: 1px solid #272727;
-}
-
-.list-home .menu-btn:last-child {
-  border-bottom: 0;
-}
-
-#btn-continue {
-  min-height: 84px;
-  margin-bottom: 6px;
-  padding: 14px 16px;
-  background: #212121;
-  border: 0;
-  border-radius: 12px;
-  border-bottom: 0;
 }
 
 .list-settings .menu-btn {
-  min-height: 52px;
-  padding: 8px 12px;
-  font-size: 18px;
+  min-height: 64px;
+  padding: 0 20px;
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #272727;
 }
 
+/* Settings value: right-aligned, 24/700, full white. */
 .list-settings .menu-btn small {
   display: inline;
   margin: 0;
-  font-size: 16px;
-  font-weight: 400;
-  color: #c9c9c9;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 700;
+  color: var(--t1);
 }
 
 .list-btn {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 72px;
-  padding: 8px 8px 8px 4px;
-}
-
-.list-btn img {
-  width: 128px;
-  height: 72px;
-  object-fit: cover;
-  border-radius: 8px;
-  background: #212121;
-  flex: 0 0 auto;
+  gap: 16px;
+  min-height: 64px;
+  padding: 0 20px;
 }
 
 .list-btn .list-copy {
@@ -247,163 +260,174 @@ html, body {
   flex: 1 1 auto;
 }
 
+/* Text rows (channels, playlists, library) keep one line; video rows clamp
+   their title to two (below). */
 .list-btn .list-label {
   display: -webkit-box;
   width: 100%;
-  max-height: 44px;
-  font-size: 16px;
-  font-weight: 500;
-  line-height: 1.35;
   white-space: normal;
   overflow: hidden;
   text-overflow: ellipsis;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
 }
 
 .menu-btn small, .list-btn small {
   display: block;
-  font-size: 14px;
-  font-weight: 400;
-  color: #c9c9c9;
-  margin-top: 3px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t2);
+  margin-top: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Action rows - "Play all" and friends - are pills, not list rows. Red on
-   black rather than the white pill YouTube uses: on an additive display white
-   fill is a bright rectangle floating in the room, and the generic :focus
-   colour rules below would put white text on it. */
-.list-btn:not(:has(img)) {
-  min-height: 44px;
-  margin: 4px 8px 12px;
-  padding: 9px 20px;
+/* Play all: the only filled button on the HUD. */
+.list-btn.is-action {
   width: auto;
   align-self: flex-start;
-  background: #ff0000;
-  color: #fff;
-  border-radius: 20px;
-  font-size: 16px;
+  min-height: 64px;
+  height: 64px;
+  margin: 4px 4px 8px;
+  padding: 0 32px;
+  background: var(--accent);
+  color: var(--t1);
+  border-radius: 32px;
+  font-size: 24px;
+  line-height: 30px;
   font-weight: 700;
-  box-shadow: none;
 }
 
-.list-btn:not(:has(img)) .list-label,
-.list-btn:not(:has(img)):focus .list-label {
-  color: #fff;
-  font-size: 16px;
-  font-weight: 700;
-  max-height: none;
+.list-btn.is-action .list-label { color: var(--t1); }
+
+/* Ring sits 4px outside the red pill so it never merges with the fill. */
+.list-btn.is-action::after {
+  inset: -4px;
+  border-radius: 36px;
 }
 
-.list-btn:not(:has(img)) small,
-.list-btn:not(:has(img)):focus small {
-  color: #ffdede;
-  font-size: 13px;
-}
+.back-row { margin-top: auto; padding-top: 0; }
 
-.list-btn:not(:has(img)):focus {
-  background: #ff0000;
-  color: #fff;
-  box-shadow: 0 0 0 3px #fff;
-}
-
-.back-row { margin-top: auto; padding-top: 8px; }
-
+/* Back rows are interim (WP3 replaces them with a footer hint). They sit in
+   the footer zone as an 18px hint, so the content keeps y 88-552. */
 .back-btn {
-  width: 100%;
-  min-height: 44px;
+  width: auto;
+  align-self: flex-start;
+  min-height: 28px;
   margin: 0;
-  padding: 10px 12px;
-  font-size: 16px;
+  padding: 2px 12px;
+  font-size: 18px;
+  line-height: 24px;
   font-weight: 500;
-  color: #c9c9c9;
+  color: var(--t3);
   background: transparent;
   border: 0;
-  border-radius: 0;
+  border-radius: 14px;
   text-align: left;
   cursor: pointer;
   box-sizing: border-box;
 }
 
-.back-hint { color: #8d8d8d; font-size: 14px; margin-left: 8px; }
+.back-hint { color: var(--t3); font-size: 18px; margin-left: 8px; }
 
-.focusable { transition: background 120ms ease, box-shadow 120ms ease; }
-.focusable:focus {
-  outline: none;
-  background: #303030;
-  box-shadow: inset 5px 0 0 #ff0000;
-  color: #fff;
+/* Focus: one style on every screen. A 3px white ring (white is about 4x
+   brighter than red on this panel) and the label going to full white.
+   Opacity only, so the change stays on the compositor. */
+.focusable {
+  position: relative;
+  transition: transform 120ms var(--ease);
 }
-.focusable:focus small { color: #e6e6e6; }
-.focusable:focus .list-label { color: #fff; }
+.focusable::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 3px solid var(--t1);
+  border-radius: 16px;
+  opacity: 0;
+  transition: opacity 240ms var(--ease);
+  pointer-events: none;
+}
+.focusable:focus { outline: none; color: var(--t1); }
+.focusable:focus::after {
+  opacity: 1;
+  transition-duration: 180ms;
+}
+.focusable:focus .list-label { color: var(--t1); }
+
+/* Pinch feedback. */
+.focusable.pressed { transform: scale(0.97); }
 
 .back-btn:focus {
-  color: #fff;
+  color: var(--t1);
 }
+.back-btn::after { border-radius: 14px; }
 
 .empty-msg {
   width: 100%;
-  font-size: 16px;
-  line-height: 1.4;
-  color: #c9c9c9;
+  box-sizing: border-box;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 500;
+  color: var(--t2);
   text-align: left;
-  padding: 28px 12px;
+  padding: 32px 20px;
 }
 
+/* Status shares the toast lane (y 500-548) and style. The black backing hides
+   the rows scrolling underneath; it adds no light, it only stops two lines of
+   text sitting on top of each other. */
 .status {
   position: absolute;
-  left: 0;
-  bottom: 0;
+  left: 24px;
+  bottom: 52px;
   z-index: 20;
-  width: 600px;
-  min-height: 34px;
-  padding: 6px 16px;
+  width: 552px;
+  min-height: 48px;
+  padding: 9px 0;
   box-sizing: border-box;
-  background: #000;
-  font-size: 14px;
-  line-height: 1.25;
-  color: #c9c9c9;
+  background: var(--bg);
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  color: var(--t1);
   text-align: left;
 }
 
-.status.status-err { color: #ff8983; }
+.status.status-err { color: var(--err); }
+.status.status-err::before { content: '! '; }
 
 body.hud-player .errbar { display: none !important; }
 
+/* Sits under the header (y 88), never over the title. */
 .errbar {
   position: absolute;
-  left: 0;
-  top: 0;
+  left: 24px;
+  top: 88px;
   z-index: 30;
-  width: 600px;
-  max-height: 84px;
+  width: 552px;
+  max-height: 72px;
   overflow: hidden;
-  padding: 8px 16px;
+  padding: 8px 0;
   box-sizing: border-box;
-  background: #000;
-  border-bottom: 1px solid #3f0f0f;
-  font-size: 14px;
-  line-height: 1.25;
-  color: #ff8983;
+  background: var(--bg);
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
+  color: var(--err);
 }
-
-.phone-url {
-  font-size: 16px;
-  color: #c9c9c9;
-  margin: 8px 0 18px;
-  text-align: center;
-}
+.errbar::before { content: '! '; }
 
 .pair-steps {
   width: 100%;
-  margin: 20px 0 0;
-  padding-left: 22px;
-  font-size: 16px;
-  line-height: 1.45;
-  color: #c9c9c9;
+  box-sizing: border-box;
+  margin: 24px 0 0;
+  padding-left: 36px;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 500;
+  color: var(--t2);
 }
 
 #yt-wrap {
@@ -455,12 +479,14 @@ body.hud-player .errbar { display: none !important; }
 
 .play-gate { z-index: 8; }
 
+
 .load-spin {
   width: 40px;
   height: 40px;
-  border: 3px solid #272727;
-  border-top-color: #fff;
+  border: 3px solid var(--hair);
+  border-top-color: var(--t1);
   border-radius: 50%;
+  box-sizing: border-box;
   animation: gtspin 0.8s linear infinite;
 }
 
@@ -493,40 +519,46 @@ body.hud-player .errbar { display: none !important; }
   border-radius: 18px;
 }
 
+
+/* From iPhone: the code is the hero, 64/800 with wide tracking. */
 .pair-code {
-  font-size: 48px;
-  font-weight: 700;
-  letter-spacing: 10px;
-  color: #fff;
+  font-size: 64px;
+  line-height: 72px;
+  font-weight: 800;
+  letter-spacing: 8px;
+  padding-left: 8px;
+  color: var(--t1);
   text-align: center;
-  margin: 28px 0 12px;
+  margin: 0 0 16px;
 }
 
 .pair-help {
   width: 100%;
-  font-size: 16px;
-  line-height: 1.4;
-  color: #c9c9c9;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 500;
+  color: var(--t2);
   text-align: center;
 }
 
 .debug-rows {
   width: 100%;
-  font-size: 15px;
-  line-height: 1.4;
-  color: #c9c9c9;
-  padding: 0 4px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t2);
+  padding: 0;
 }
 
 .debug-rows div {
-  margin: 8px 0;
+  margin: 0 0 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.debug-ok { color: #3ddc84; }
-.debug-bad { color: #ff8983; }
+.debug-ok { color: var(--ok); }
+.debug-bad { color: var(--err); }
 
 #screen-player {
   padding: 0;
@@ -634,99 +666,87 @@ body.hud-player .errbar { display: none !important; }
   user-select: text;
 }
 
+
+/* Kept in the DOM so 'Copy errors' can select it, but never drawn. */
 #debug-log {
+  position: absolute;
+  left: -9999px;
+  top: 0;
   display: block;
-  width: 100%;
+  width: 552px;
   min-height: 120px;
-  margin: 8px 0 4px;
+  margin: 0;
   padding: 8px 10px;
   box-sizing: border-box;
-  font: 13px/1.35 ui-monospace, Menlo, monospace;
-  color: #eee;
-  background: #1a1a1a;
+  font: 18px/1.35 ui-monospace, Menlo, monospace;
+  color: var(--t1);
+  background: transparent;
   border: 0;
-  border-radius: 8px;
-  resize: vertical;
+  resize: none;
   -webkit-user-select: text;
   user-select: text;
 }
 
+/* 'New code' is a plain row with the standard ring, not a grey pill with a
+   red-only focus. */
 #btn-pair-new.menu-btn {
   width: auto;
   align-self: flex-start;
-  min-height: 40px;
-  margin: 0 0 8px 12px;
-  padding: 8px 16px;
-  background: #272727;
-  border-radius: 18px;
-  border-bottom: 0;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-#btn-pair-new.menu-btn:focus {
-  background: #3f3f3f;
-  box-shadow: 0 0 0 3px #ff0000;
+  min-height: 48px;
+  margin: 0 0 4px;
+  padding: 0 20px;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
 }
 
 
 /* ---- Thumbnails that say how far in you already are --------------------- */
 
+/* Video row: 112px, 160x90 thumbnail. Thumbnails rest at .55 so the light on
+   the lens follows the focused row. */
 .list-shot {
   position: relative;
   display: block;
-  width: 128px;
-  height: 72px;
+  width: 160px;
+  height: 90px;
   flex: 0 0 auto;
 }
 
 .list-shot img {
-  width: 128px;
-  height: 72px;
+  width: 160px;
+  height: 90px;
   object-fit: cover;
-  border-radius: 8px;
-  background: #212121;
+  border-radius: 12px;
   display: block;
+  opacity: 0.55;
+  transition: opacity 180ms var(--ease);
 }
 
-.list-dur {
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  padding: 1px 4px;
-  background: rgba(0, 0, 0, 0.85);
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #fff;
-  line-height: 1.3;
-}
+.list-btn:focus .list-shot img { opacity: 1; }
 
 .list-seen {
   position: absolute;
   left: 0;
   bottom: 0;
-  height: 3px;
-  background: #ff0000;
-  border-radius: 0 0 0 8px;
+  height: 5px;
+  background: var(--accent);
+  border-radius: 0 0 0 12px;
 }
 
-/* The list rows used to key their pill styling off :has(img); the thumbnail is
-   now wrapped, so match the wrapper too. */
-.list-btn:has(.list-shot) {
-  min-height: 72px;
-  margin: 0;
-  padding: 8px 8px 8px 4px;
-  width: 100%;
-  align-self: stretch;
-  background: transparent;
-  color: #f1f1f1;
-  border-radius: 0;
-  font-size: 18px;
-  font-weight: 500;
+.list-btn.has-shot {
+  min-height: 112px;
+  padding: 0 12px;
+  gap: 16px;
 }
 
-.list-btn:has(.list-shot) small { color: #c9c9c9; }
+.list-btn.has-shot .list-label {
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  max-height: 60px;
+  -webkit-line-clamp: 2;
+}
 
 /* ---- Buffered-ahead shadow on the scrub bar ---------------------------- */
 
@@ -749,47 +769,88 @@ body.hud-player .errbar { display: none !important; }
   border-radius: 8px;
 }
 
+
 /* ---- The band-driven letter grid --------------------------------------- */
 
+/* Search field: transparent with a hairline underline, 28/700. The text node
+   comes first, then the caret (::after, order 1), then a zero-width spacer
+   (::before, order 2) whose auto margin takes the free space while the query
+   fits. Once it overflows the margin collapses and flex-end keeps the end of
+   the query, the letters just typed, in view. */
 .kb-text {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
   width: 100%;
-  min-height: 42px;
+  height: 52px;
   margin: 0 0 8px;
-  padding: 8px 12px;
+  padding: 0 4px;
   box-sizing: border-box;
-  background: #212121;
-  border-radius: 8px;
-  font-size: 22px;
+  background: transparent;
+  border-bottom: 2px solid var(--hair);
+  font-size: 28px;
+  line-height: 36px;
   font-weight: 700;
-  letter-spacing: 2px;
-  color: #fff;
+  letter-spacing: 1px;
+  color: var(--t1);
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.kb-text::after {
+  content: '';
+  order: 1;
+  flex: 0 0 2px;
+  height: 32px;
+  margin-left: 3px;
+  background: var(--t1);
+  animation: kbcaret 1s steps(1) infinite;
+}
+
+.kb-text::before {
+  content: '';
+  order: 2;
+  flex: 0 0 0px;
+  margin-left: auto;
 }
 
 .kb-text.kb-empty {
-  font-size: 16px;
-  font-weight: 400;
+  font-size: 24px;
+  font-weight: 500;
   letter-spacing: 0;
-  color: #8d8d8d;
+  color: var(--t3);
+}
+
+.kb-text.kb-empty::after { display: none; }
+
+@keyframes kbcaret {
+  50% { opacity: 0; }
 }
 
 .kb-recent {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 8px;
+  height: 44px;
+  margin: 0 0 8px;
+  overflow: hidden;
 }
 
 .kb-recent-btn {
-  max-width: 180px;
-  padding: 5px 12px;
-  background: #272727;
-  border: 0;
-  border-radius: 14px;
-  color: #f1f1f1;
-  font-size: 14px;
+  flex: 0 1 auto;
+  max-width: 200px;
+  height: 44px;
+  padding: 0 16px;
+  box-sizing: border-box;
+  background: transparent;
+  border: 1.5px solid var(--hair);
+  border-radius: 22px;
+  color: var(--t2);
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -798,56 +859,173 @@ body.hud-player .errbar { display: none !important; }
 
 .kb-grid {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
 }
 
 .kb-row {
   display: flex;
-  gap: 5px;
+  gap: 4px;
 }
 
+/* Keys: outlines, never fills. 10 columns of about 51.6px in x 24-576. */
 .kb-key {
+  position: relative;
   flex: 1 1 0;
   min-width: 0;
-  height: 46px;
+  height: 52px;
   padding: 0;
-  background: #1c1c1c;
-  border: 1px solid #2f2f2f;
-  border-radius: 7px;
-  color: #f1f1f1;
-  font-size: 20px;
-  font-weight: 500;
+  box-sizing: border-box;
+  background: transparent;
+  border: 1.5px solid var(--hair);
+  border-radius: 12px;
+  color: var(--t2);
+  font-size: 28px;
+  font-weight: 600;
   font-family: inherit;
   cursor: pointer;
 }
 
-.kb-key.kb-space { font-size: 14px; }
+.kb-key::after {
+  content: '';
+  position: absolute;
+  inset: -1.5px;
+  border: 3px solid var(--t1);
+  border-radius: 12px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.kb-key.kb-space { font-size: 22px; }
 
 .kb-actions .kb-key {
-  height: 44px;
-  font-size: 16px;
-  font-weight: 700;
+  height: 52px;
+  font-size: 28px;
+  font-weight: 600;
 }
 
 .kb-key.kb-go {
-  background: #fff;
-  border-color: #fff;
-  color: #0f0f0f;
+  border: 2px solid var(--accent);
+  color: var(--t1);
 }
+
+.kb-key.kb-go::after { inset: -2px; }
 
 /* The grid cursor is its own thing: the band moves a highlight, it never moves
-   DOM focus, so :focus styling would not show anything here. */
+   DOM focus, so :focus styling would not show anything here. Same white ring
+   as focus, plus a slight lift. */
 .kb-key.kb-on {
-  background: #fff;
-  border-color: #fff;
-  color: #0f0f0f;
-  box-shadow: 0 0 0 3px #ff0000;
+  z-index: 1;
+  color: var(--t1);
+  transform: scale(1.06);
 }
 
+.kb-key.kb-on::after { opacity: 1; }
+
+/* The Search key fills red only while the cursor is on it. */
 .kb-key.kb-go.kb-on {
-  background: #ff0000;
-  border-color: #ff0000;
-  color: #fff;
-  box-shadow: 0 0 0 3px #fff;
+  background: var(--accent);
+  color: var(--t1);
 }
+
+/* WP2: scroll fades. 32px black-to-clear overlays at the edges of the scroll
+   area, present only while content continues past that edge (reveal() and
+   syncFades() toggle the classes). Sticky pseudo-elements: they never take
+   focus, and the negative margin (height plus the row gap) means toggling them
+   never moves a row. Black over the HUD's own rows dims them into the room. */
+.screen-body.fade-top::before,
+.screen-body.fade-bottom::after {
+  content: '';
+  position: sticky;
+  z-index: 2;
+  display: block;
+  flex: 0 0 32px;
+  height: 32px;
+  pointer-events: none;
+}
+
+.screen-body.fade-top::before {
+  top: 0;
+  margin-bottom: calc(-32px - var(--gap, 0px));
+  background: linear-gradient(var(--bg), rgba(0, 0, 0, 0));
+}
+
+.screen-body.fade-bottom::after {
+  bottom: 0;
+  margin-top: calc(-32px - var(--gap, 0px));
+  background: linear-gradient(rgba(0, 0, 0, 0), var(--bg));
+}
+
+/* WP2: toast. One short message in the lane above the footer (y 500-548),
+   24/600, no light fill, a leading glyph by kind, two lines at most. The black
+   backing only hides rows scrolling underneath. showToast() drives it. */
+.toast {
+  position: absolute;
+  left: 24px;
+  bottom: 52px;
+  z-index: 25;
+  width: 552px;
+  min-height: 48px;
+  max-height: 78px;
+  padding: 9px 0;
+  box-sizing: border-box;
+  background: var(--bg);
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  color: var(--t1);
+  text-align: left;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 250ms var(--ease);
+  animation: toastin 250ms var(--ease);
+}
+
+.toast.toast-out { opacity: 0; }
+.toast-ok::before { content: '\2713\00a0\00a0'; color: var(--ok); }
+.toast-err::before { content: '!\00a0\00a0'; color: var(--err); }
+.toast-info::before { content: '\2193\00a0\00a0'; color: var(--t1); }
+
+@keyframes toastin {
+  from { opacity: 0; }
+}
+
+/* A toast and a status line can both be up: the status steps above it. */
+.toast:not(.hidden) + .status { bottom: 100px; }
+
+/* WP2: settings. '‹ value ›' on the focused row says a pinch changes it. */
+.list-settings .menu-btn:focus small::before { content: '‹\00a0'; color: var(--t3); }
+.list-settings .menu-btn:focus small::after { content: '\00a0›'; color: var(--t3); }
+
+/* WP2: 'Searching…' and 'Loading…' empty states carry the spinner. */
+.empty-msg.empty-busy {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.empty-msg .load-spin {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+}
+
+/* WP2: From iPhone keeps the code block centred in the free space. */
+#screen-phone .screen-body { justify-content: safe center; }
+
+/* WP2: Diagnostics actions sit on one line so the rows get the room. */
+#screen-debug .back-row {
+  flex-direction: row;
+  gap: 8px;
+}
+
+/* interim until WP3/WP8 drop the focusable Back row on Search: it keeps DOM
+   focus while the band drives the grid cursor, and a pinch goes to the grid,
+   so the cursor must be the only focus indicator there. */
+#btn-search-back::after { display: none; }
+#btn-search-back:focus { color: var(--t3); }
