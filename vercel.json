@@ -93,6 +93,10 @@
     {
       "source": "/api/search",
       "destination": "/api/feed?mode=search"
+    },
+    {
+      "source": "/api/suggest",
+      "destination": "/api/feed?mode=suggest"
     }
   ]
 }

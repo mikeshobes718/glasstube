@@ -298,7 +298,11 @@ async function runPlayback(browser, fileUrl) {
     // traps the wearer: the glasses keep their own back gesture.
     await page.evaluate(() => document.querySelector('[data-menu="search"]').click());
     await page.waitForTimeout(250);
-    for (let i = 0; i < 4; i++) { await page.keyboard.press('ArrowDown'); await page.waitForTimeout(50); }
+    // Action row is Search | Delete | Clear | Back: Down 4 lands on Search,
+    // Right 3 on Back. Spaced so the input arbiter does not merge presses.
+    for (let i = 0; i < 4; i++) { await page.keyboard.press('ArrowDown'); await page.waitForTimeout(200); }
+    for (let i = 0; i < 3; i++) { await page.keyboard.press('ArrowRight'); await page.waitForTimeout(200); }
+    await page.waitForTimeout(400);
     const onKey = await page.$eval('.kb-key.kb-on', e => e.textContent);
     await page.keyboard.press('Enter');
     await page.waitForTimeout(300);

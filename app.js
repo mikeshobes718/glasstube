@@ -1184,9 +1184,16 @@ function loadChannel(ch, onBack) {
 /* ---- Search ------------------------------------------------------------
 
    The glasses have no keyboard. The Neural Band gives four directions and a
-   pinch, which is exactly enough to drive a letter grid, so that is what this
-   is: a 10-wide grid the wearer walks with the D-pad. Recent queries sit above
-   it because re-running a search should never cost 12 pinches. */
+   pinch, so the screen is a stack of cursor rows the band walks:
+     row -2   the native search field. A pinch on it opens the system composer
+              (dictation, handwriting, keyboard) on firmware v127 and later.
+     row -1   chips: the 4 most recent searches, or up to 4 suggestions once
+              two letters are typed. Re-running a search is pinch, Up, pinch.
+     rows 0-3 a 10-wide letter grid, the fallback when there is no composer.
+     row 4    actions: Search | Delete | Clear | Back.
+   The cursor is a class (.kb-on), not DOM focus, except on the field, which
+   needs real focus for the composer. Up and Down never wrap; Left and Right
+   wrap within a row. Left with an empty field at the left edge goes back. */
 
 const KEY_ROWS = [
   'ABCDEFGHIJ'.split(''),
@@ -1195,117 +1202,383 @@ const KEY_ROWS = [
   '456789'.split('').concat([' ']),
 ];
 const KEY_ACTIONS = [
-  { label: 'Back', act: 'back', wide: true },
+  { label: 'Search', act: 'go', wide: true, primary: true },
   { label: 'Delete', act: 'del', wide: true },
   { label: 'Clear', act: 'clear', wide: true },
-  { label: 'Search', act: 'go', wide: true, primary: true },
+  { label: 'Back', act: 'back', wide: true },
 ];
+const KB_INPUT_ROW = -2;
+const KB_CHIP_ROW = -1;
+const KB_MAX = 60;
+const SUGGEST_DEBOUNCE_MS = 300;
+const SUGGEST_TIMEOUT_MS = 3000;
 
 let typed = '';
 let keyRow = 0;
 let keyCol = 0;
+// Where the cursor sits across the row (0-1). Rows have 10, 7 and 4 keys, so
+// moving between them by position, and remembering it, makes Down then Up
+// come back to the same key.
+let keyX = 0.05;
+let chipIdx = 0;
+let kbKeys = null;
+let kbChipsShown = '';
+let kbBlurring = false;
+let suggestFor = '';
+let suggestList = [];
+let suggestTimer = 0;
+let suggestCtl = null;
 
 function keyGrid() {
   return KEY_ROWS.concat([KEY_ACTIONS.map(a => a.label)]);
 }
 
-function renderSearch() {
+function kbInput() {
+  return $('#kb-input');
+}
+
+/* The composer cannot type ' " _ [ ] and the search does not need them. */
+function cleanQuery(s) {
+  return String(s || '').replace(/['"_[\]]/g, '').toUpperCase().slice(0, KB_MAX);
+}
+
+/* Suggestions replace the recents once two letters are typed and an answer
+   for this prefix is in. Anything else (no answer yet, offline, refused)
+   shows recents, so a failure is silent. */
+function searchChips() {
+  const q = typed.trim().toLowerCase();
+  if (q.length >= 2 && suggestList.length && suggestFor && q.indexOf(suggestFor) === 0) {
+    return { kind: 'suggest', items: suggestList.slice(0, 4) };
+  }
+  return { kind: 'recent', items: queriesLoad().slice(0, 4) };
+}
+
+/* The keys never change, so build them once and only move the .kb-on class
+   afterwards: a full rebuild per swipe is wasted work on the glasses' CPU. */
+function buildSearchGrid() {
   const box = $('#kb-grid');
-  if (!box) return;
+  if (!box) return null;
   box.innerHTML = '';
   const grid = keyGrid();
-  grid.forEach((row, r) => {
+  return grid.map((row, r) => {
     const line = document.createElement('div');
     line.className = 'kb-row' + (r === grid.length - 1 ? ' kb-actions' : '');
-    row.forEach((cell, c) => {
+    const keys = row.map((cell, c) => {
       const b = document.createElement('button');
       const action = r === grid.length - 1 ? KEY_ACTIONS[c] : null;
       b.className = 'kb-key' +
-        (r === keyRow && c === keyCol ? ' kb-on' : '') +
         (action && action.primary ? ' kb-go' : '') +
         (action ? ' kb-wide' : '');
+      b.tabIndex = -1;
       b.textContent = cell === ' ' ? 'Space' : cell;
       if (cell === ' ') b.classList.add('kb-space');
-      b.addEventListener('click', () => { keyRow = r; keyCol = c; pressKey(); });
+      b.addEventListener('click', () => {
+        kbSetRow(r);
+        keyCol = c;
+        keyX = (c + 0.5) / row.length;
+        pressKey();
+      });
       line.appendChild(b);
+      return b;
     });
     box.appendChild(line);
+    return keys;
   });
-  const field = $('#kb-text');
-  if (field) {
-    field.textContent = typed || 'Type a search';
-    field.classList.toggle('kb-empty', !typed);
-  }
-  const recents = $('#kb-recent');
-  if (recents) {
-    recents.innerHTML = '';
-    queriesLoad().slice(0, 4).forEach(q => {
+}
+
+/* A suggestion repeats what is already typed; once that is long, show it
+   from the last typed word so the part that differs is what fits. */
+function chipLabel(text, kind) {
+  const q = typed.toLowerCase();
+  if (kind !== 'suggest' || q.length < 12 || text.toLowerCase().indexOf(q) !== 0) return text;
+  const cut = q.lastIndexOf(' ') + 1;
+  return cut > 0 ? '…' + text.slice(cut) : text;
+}
+
+function renderSearchChips(chips) {
+  const box = $('#kb-chips');
+  if (!box) return;
+  const labels = chips.items.map(t => chipLabel(t, chips.kind));
+  const sig = chips.kind + '\n' + chips.items.join('\n') + '\n' + labels.join('\n');
+  if (sig !== kbChipsShown) {
+    kbChipsShown = sig;
+    box.innerHTML = '';
+    chips.items.forEach((text, i) => {
       const b = document.createElement('button');
-      b.className = 'kb-recent-btn';
-      b.textContent = q;
-      b.addEventListener('click', () => { typed = q; runSearch(); });
-      recents.appendChild(b);
+      b.className = 'kb-chip';
+      b.tabIndex = -1;
+      b.textContent = labels[i];
+      b.addEventListener('click', () => { typed = text; runSearch(); });
+      box.appendChild(b);
     });
-    recents.classList.toggle('hidden', !queriesLoad().length);
   }
+  box.classList.toggle('kb-suggest', chips.kind === 'suggest');
+  if (chipIdx > chips.items.length - 1) chipIdx = Math.max(0, chips.items.length - 1);
+  const onChips = keyRow === KB_CHIP_ROW;
+  Array.prototype.forEach.call(box.children, (b, i) => b.classList.toggle('kb-on', onChips && i === chipIdx));
+  // One row, scrolled sideways so the chip under the cursor is always whole
+  // and clear of the 32px fades that say more chips sit past an edge.
+  const on = onChips ? box.children[chipIdx] : null;
+  if (!on) box.scrollLeft = 0;
+  else if (on.offsetLeft < box.scrollLeft + 36) box.scrollLeft = Math.max(0, on.offsetLeft - 36);
+  else if (on.offsetLeft + on.offsetWidth > box.scrollLeft + box.clientWidth - 36) {
+    box.scrollLeft = on.offsetLeft + on.offsetWidth - box.clientWidth + 36;
+  }
+  box.classList.toggle('kb-fade-l', box.scrollLeft > 0);
+  box.classList.toggle('kb-fade-r', box.scrollLeft + box.clientWidth < box.scrollWidth - 1);
+}
+
+function renderSearch() {
+  if (!kbKeys || !kbKeys[0][0].isConnected) kbKeys = buildSearchGrid();
+  if (!kbKeys) return;
+  const chips = searchChips();
+  if (keyRow === KB_CHIP_ROW && !chips.items.length) kbSetRow(0);
+  kbKeys.forEach((row, r) => row.forEach((b, c) => {
+    b.classList.toggle('kb-on', r === keyRow && c === keyCol);
+  }));
+  const input = kbInput();
+  if (input) {
+    if (cleanQuery(input.value) !== cleanQuery(typed)) input.value = typed;
+    // Show the end of the query, the part just typed, not the start, and
+    // fade the cut-off start instead of slicing a letter in half.
+    if (document.activeElement !== input) input.scrollLeft = input.scrollWidth;
+    input.classList.toggle('kb-long', input.scrollWidth > input.clientWidth + 1);
+  }
+  const field = $('#kb-field');
+  if (field) field.classList.toggle('kb-on', keyRow === KB_INPUT_ROW);
+  renderSearchChips(chips);
+  const hint = $('#kb-hint');
+  if (hint) {
+    hint.classList.toggle('hidden',
+      !(chips.kind === 'suggest' && typed.trim().length >= 3 && keyRow >= 0));
+  }
+}
+
+function kbFocusInput() {
+  const input = kbInput();
+  if (!input) return;
+  try { input.focus({ preventScroll: true }); } catch (e) { input.focus(); }
+  const n = input.value.length;
+  try { input.setSelectionRange(n, n); } catch (e) { /* not supported */ }
+}
+
+/* Our own blur must not count as the composer committing text: Chrome fires
+   'change' on blur when the value changed while focused. */
+function kbBlurInput() {
+  const input = kbInput();
+  if (!input || document.activeElement !== input) return;
+  kbBlurring = true;
+  try { input.blur(); } finally { kbBlurring = false; }
+}
+
+function kbSetRow(r) {
+  const was = keyRow;
+  keyRow = r;
+  if (r === KB_CHIP_ROW) chipIdx = 0;
+  if (r >= 0) {
+    const n = keyGrid()[r].length;
+    keyCol = Math.max(0, Math.min(n - 1, Math.floor(keyX * n)));
+  }
+  if (r === KB_INPUT_ROW) kbFocusInput();
+  else if (was === KB_INPUT_ROW) kbBlurInput();
 }
 
 function moveKey(dr, dc) {
   const grid = keyGrid();
-  keyRow = (keyRow + dr + grid.length) % grid.length;
+  if (dr) {
+    let r = keyRow + dr;
+    if (r === KB_CHIP_ROW && !searchChips().items.length) r += dr;
+    // No vertical wrap: Up from the field and Down from the actions stay put,
+    // so a stray swipe never lands on Back and throws the query away.
+    if (r < KB_INPUT_ROW || r > grid.length - 1) return;
+    kbSetRow(r);
+    renderSearch();
+    return;
+  }
+  if (keyRow === KB_INPUT_ROW) return;
+  if (keyRow === KB_CHIP_ROW) {
+    const n = searchChips().items.length;
+    if (!n) return;
+    chipIdx = (chipIdx + dc + n) % n;
+    renderSearch();
+    return;
+  }
   const row = grid[keyRow];
-  if (dr !== 0) keyCol = Math.min(keyCol, row.length - 1);
-  else keyCol = (keyCol + dc + row.length) % row.length;
+  keyCol = (keyCol + dc + row.length) % row.length;
+  keyX = (keyCol + 0.5) / row.length;
+  renderSearch();
+}
+
+/* Left is the app-wide back gesture. Here it only goes back from the left
+   edge (field, first chip, or A) with nothing typed; anywhere else it moves
+   the cursor, so it can never throw a query away. */
+function searchLeftIsBack() {
+  if (typed) return false;
+  if (keyRow === KB_INPUT_ROW) return true;
+  if (keyRow === KB_CHIP_ROW) return chipIdx === 0;
+  return keyRow === 0 && keyCol === 0;
+}
+
+function leaveSearch() {
+  kbBlurInput();
+  suggestCancel();
+  goBack();
+}
+
+function searchTyped() {
+  suggestSchedule();
   renderSearch();
 }
 
 function pressKey() {
+  if (keyRow === KB_INPUT_ROW) {
+    if (typed.trim()) runSearch();
+    else kbFocusInput();
+    return;
+  }
+  if (keyRow === KB_CHIP_ROW) {
+    const pick = searchChips().items[chipIdx];
+    if (pick) { typed = pick; runSearch(); }
+    return;
+  }
   const grid = keyGrid();
   if (keyRow === grid.length - 1) {
     const action = KEY_ACTIONS[keyCol];
     if (!action) return;
-    if (action.act === 'back') { show('home'); return; }
+    if (action.act === 'back') { leaveSearch(); return; }
+    if (action.act === 'go') { runSearch(); return; }
     if (action.act === 'del') typed = typed.slice(0, -1);
     if (action.act === 'clear') typed = '';
-    if (action.act === 'go') { runSearch(); return; }
-    renderSearch();
+    searchTyped();
     return;
   }
-  if (typed.length < 60) typed += grid[keyRow][keyCol];
+  if (typed.length < KB_MAX) typed += grid[keyRow][keyCol];
+  searchTyped();
+}
+
+/* Text from the field: the composer (dictation, handwriting, on-screen
+   keyboard) or a real keyboard. Mid-composition the value is left alone so
+   the IME is not disturbed; stripped characters are removed once it ends. */
+function searchFromInput(e) {
+  const input = kbInput();
+  if (!input || current !== 'search') return;
+  const next = cleanQuery(input.value);
+  if (!(e && e.isComposing) && next !== input.value.toUpperCase().slice(0, KB_MAX)) {
+    input.value = next;
+  }
+  if (document.activeElement === input && keyRow !== KB_INPUT_ROW) keyRow = KB_INPUT_ROW;
+  if (next !== typed) {
+    typed = next;
+    suggestSchedule();
+  }
   renderSearch();
 }
 
-function openSearch() {
-  typed = '';
-  keyRow = 0;
-  keyCol = 0;
+function suggestCancel() {
+  clearTimeout(suggestTimer);
+  suggestTimer = 0;
+  if (suggestCtl) {
+    try { suggestCtl.abort(); } catch (e) { /* already done */ }
+    suggestCtl = null;
+  }
+}
+
+function suggestSchedule() {
+  const q = typed.trim().toLowerCase();
+  suggestCancel();
+  if (q.length < 2 || q === suggestFor) return;
+  suggestTimer = setTimeout(function () { suggestFetch(q); }, SUGGEST_DEBOUNCE_MS);
+}
+
+function suggestFetch(q) {
+  suggestTimer = 0;
+  if (current !== 'search') return;
+  // navGen is the ghost-load guard (WP3); without it, current and typed
+  // still drop an answer the wearer has moved past.
+  const gen = typeof navGen !== 'undefined' ? navGen : 0;
+  const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+  suggestCtl = ctl;
+  const killer = setTimeout(function () { if (ctl) ctl.abort(); }, SUGGEST_TIMEOUT_MS);
+  const stale = () => (typeof navGen !== 'undefined' && navGen !== gen) ||
+    current !== 'search' || typed.trim().toLowerCase() !== q;
+  fetch('/api/suggest?q=' + encodeURIComponent(q), ctl ? { signal: ctl.signal } : undefined)
+    .then(r => r.json())
+    .then(d => {
+      if (stale()) return;
+      suggestFor = q;
+      suggestList = d && d.ok && Array.isArray(d.suggestions)
+        ? d.suggestions.filter(s => typeof s === 'string' && s.trim())
+          .map(s => s.trim().slice(0, 80)).slice(0, 4)
+        : [];
+      renderSearch();
+    })
+    .catch(function () {
+      // Timed out or offline: fall back to recents, silently. A newer
+      // keystroke cancelling this request is not a failure.
+      if (suggestCtl !== ctl || stale()) return;
+      suggestFor = q;
+      suggestList = [];
+      renderSearch();
+    })
+    .then(function () {
+      clearTimeout(killer);
+      if (suggestCtl === ctl) suggestCtl = null;
+    });
+}
+
+/* keep: coming back from the results (the list's Back) keeps the query and
+   parks the cursor on the Search key. Opening Search from Home starts empty. */
+function openSearch(keep) {
+  kbBlurInput();
+  suggestCancel();
+  if (keep) {
+    keyRow = keyGrid().length - 1;
+    keyCol = 0;
+    keyX = 0.05;
+  } else {
+    typed = '';
+    suggestFor = '';
+    suggestList = [];
+    keyRow = 0;
+    keyCol = 0;
+    keyX = 0.05;
+  }
+  chipIdx = 0;
+  const input = kbInput();
+  if (input && !keep) input.value = '';
   show('search');
+  // Only the grid cursor is lit: nothing on this screen holds DOM focus.
+  if (document.activeElement && document.activeElement !== document.body &&
+      document.activeElement.blur) document.activeElement.blur();
   renderSearch();
+  if (keep) suggestSchedule();
 }
 
 function runSearch() {
   const q = typed.trim();
   if (!q) return;
+  kbBlurInput();
+  suggestCancel();
   lastQuery = q;
   queriesAdd(q);
   setStatus('Searching ' + q + '...');
-  renderList('Search', [], 'Searching...', () => openSearch(), 'Back', 'search');
+  renderList('Search', [], 'Searching...', () => openSearch(true), 'Back', 'search');
   fetch('/api/search?q=' + encodeURIComponent(q) + '&limit=20')
     .then(r => r.json())
     .then(d => {
       if (!d.ok || !(d.videos || []).length) {
         setStatus('');
         renderList('Search: ' + q, [],
-          d.error || 'Nothing found for that.', () => openSearch(), 'Back', 'search');
+          d.error || 'Nothing found for that.', () => openSearch(true), 'Back', 'search');
         return;
       }
       setStatus('');
       setOffline(false);
-      showVideoList('Search: ' + q, d.videos, () => openSearch(), 'search');
+      showVideoList('Search: ' + q, d.videos, () => openSearch(true), 'search');
     })
     .catch(e => {
       setOffline(true);
-      renderList('Search: ' + q, [], netText(e), () => openSearch(), 'Back', 'search');
+      renderList('Search: ' + q, [], netText(e), () => openSearch(true), 'Back', 'search');
     });
 }
 
@@ -1719,22 +1992,50 @@ function handlePlayerKey(e) {
 
 function handleSearchKey(e) {
   const key = e.key;
+  const input = kbInput();
+  if (input && document.activeElement === input) {
+    // The field holds real focus so a pinch can open the composer. Only the
+    // band's keys are taken, with preventDefault so arrows never move the
+    // text caret. Everything else (letters, Backspace, the IME's
+    // 'Unidentified' keys) is left alone and arrives as typing.
+    if (key === DPAD.UP || key === DPAD.RIGHT) { e.preventDefault(); return; }
+    if (key === DPAD.DOWN) { e.preventDefault(); moveKey(1, 0); return; }
+    if (key === DPAD.LEFT) {
+      e.preventDefault();
+      if (searchLeftIsBack()) leaveSearch();
+      return;
+    }
+    if (key === DPAD.SELECT) {
+      if (typed.trim()) { e.preventDefault(); runSearch(); }
+      // Empty field: the pinch goes through, which is what opens the composer.
+      return;
+    }
+    if (key === 'Escape' || key === 'BrowserBack' || key === 'GoBack') {
+      e.preventDefault();
+      leaveSearch();
+    }
+    return;
+  }
   if (isBackKey(key)) {
     e.preventDefault();
-    show('home');
+    leaveSearch();
     return;
   }
   if (key === DPAD.UP) { e.preventDefault(); moveKey(-1, 0); return; }
   if (key === DPAD.DOWN) { e.preventDefault(); moveKey(1, 0); return; }
-  if (key === DPAD.LEFT) { e.preventDefault(); moveKey(0, -1); return; }
+  if (key === DPAD.LEFT) {
+    e.preventDefault();
+    if (searchLeftIsBack()) leaveSearch();
+    else moveKey(0, -1);
+    return;
+  }
   if (key === DPAD.RIGHT) { e.preventDefault(); moveKey(0, 1); return; }
   if (key === DPAD.SELECT || key === ' ') { e.preventDefault(); pressKey(); return; }
-  if (key === 'Backspace') { e.preventDefault(); typed = typed.slice(0, -1); renderSearch(); return; }
   // A real keyboard is attached when rehearsing on a computer. Let it type.
-  if (key && key.length === 1 && typed.length < 60) {
+  if (key && key.length === 1 && typed.length < KB_MAX) {
     e.preventDefault();
-    typed += key.toUpperCase();
-    renderSearch();
+    typed = cleanQuery(typed + key);
+    searchTyped();
   }
 }
 
@@ -1801,8 +2102,23 @@ $('#btn-pair-new').addEventListener('click', () => {
 $('#btn-debug-back').addEventListener('click', () => show('home'));
 const relayBtn = $('#btn-relay');
 if (relayBtn) relayBtn.addEventListener('click', openRelay);
-const searchBack = $('#btn-search-back');
-if (searchBack) searchBack.addEventListener('click', () => show('home'));
+const kbField = kbInput();
+if (kbField) {
+  kbField.addEventListener('input', searchFromInput);
+  kbField.addEventListener('compositionend', searchFromInput);
+  // The composer commits with 'change' (or Enter, handled in handleSearchKey).
+  kbField.addEventListener('change', function (e) {
+    if (kbBlurring || current !== 'search') return;
+    searchFromInput(e);
+    if (typed.trim()) runSearch();
+  });
+  // A tap on the field (or the system focusing it) moves the cursor there.
+  kbField.addEventListener('focus', function () {
+    if (current !== 'search' || keyRow === KB_INPUT_ROW) return;
+    keyRow = KB_INPUT_ROW;
+    renderSearch();
+  });
+}
 $('#btn-settings-back').addEventListener('click', () => show('home'));
 $('#btn-retest').addEventListener('click', runSelfTest);
 $('#btn-copy-debug').addEventListener('click', function () {

@@ -165,12 +165,16 @@ window.addEventListener('unhandledrejection', function (e) {
 
 <section id="screen-search" class="screen hidden">
   <h2 class="title">Search</h2>
-  <div id="kb-text" class="kb-text kb-empty">Type a search</div>
-  <div id="kb-recent" class="kb-recent hidden"></div>
-  <div id="kb-grid" class="kb-grid"></div>
-  <div class="list back-row">
-    <button class="focusable back-btn" id="btn-search-back">Back <span class="back-hint">swipe left</span></button>
+  <div id="kb-field" class="kb-field">
+    <input id="kb-input" class="kb-input" type="search" enterkeyhint="search"
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+      maxlength="60" placeholder="Pinch to speak or type" aria-label="Search">
   </div>
+  <div class="kb-chips-row">
+    <div id="kb-chips" class="kb-chips"></div>
+    <span id="kb-hint" class="kb-hint hidden">▲ suggestions</span>
+  </div>
+  <div id="kb-grid" class="kb-grid"></div>
 </section>
 
 <section id="screen-phone" class="screen hidden">
