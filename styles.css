@@ -406,29 +406,68 @@ body.hud-player .errbar { display: none !important; }
   color: #c9c9c9;
 }
 
+/* The player is the whole 600x600 canvas. Black is see-through on the lens,
+   so the picture floats centred in the sharpest part of it. */
 #yt-wrap {
-  position: relative;
+  position: absolute;
+  left: 0;
+  top: 0;
   width: 600px;
-  height: 338px;
+  height: 600px;
   overflow: hidden;
   background: #000;
 }
 
-#yt-slot,
-#yt-host,
-#yt-host iframe {
+/* Iframe routes (embed, go) keep 600x338, centred at y 131. */
+#yt-slot {
+  position: absolute;
+  left: 0;
+  top: 131px;
+  width: 600px;
+  height: 338px;
+}
+
+#yt-slot > iframe,
+#yt-slot > div {
+  display: block;
   width: 600px;
   height: 338px;
   border: 0;
   pointer-events: none;
+  background: #000;
+}
+
+/* HTML5 routes get the whole box with object-fit: contain, so 16:9 lands at
+   600x338 centred and 9:16 at 338x600. #yt-video is WP5's persistent element;
+   #yt-slot > video is the per-video element it replaces. */
+#yt-slot:has(> video) {
+  top: 0;
+  height: 600px;
+}
+
+#yt-video-slot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 600px;
+  height: 600px;
+}
+
+#yt-slot > video,
+#yt-video {
+  display: block;
+  width: 600px;
+  height: 600px;
+  border: 0;
   object-fit: contain;
+  pointer-events: none;
   background: #000;
 }
 
 #yt-poster {
   position: absolute;
   left: 0;
-  top: 0;
+  top: 131px;
   width: 600px;
   height: 338px;
   object-fit: cover;
@@ -437,8 +476,20 @@ body.hud-player .errbar { display: none !important; }
 
 #yt-poster.hidden { display: none !important; }
 
-#yt-wrap.audio-only #yt-slot { visibility: hidden; }
-#yt-wrap.audio-only #yt-poster { display: block !important; opacity: 1; }
+/* Audio only: the picture is not drawn at all, and the poster shrinks to a
+   dim 160x90 thumbnail bottom-left, so 3-5% of the panel is lit. */
+#yt-wrap.audio-only #yt-slot > video,
+#yt-wrap.audio-only #yt-video-slot { display: none; }
+#yt-wrap.audio-only #yt-slot > iframe { visibility: hidden; }
+#yt-wrap.audio-only #yt-poster {
+  display: block !important;
+  left: 24px;
+  top: 376px;
+  width: 160px;
+  height: 90px;
+  border-radius: 12px;
+  opacity: .35;
+}
 
 .load-gate,
 .play-gate {
@@ -449,16 +500,17 @@ body.hud-player .errbar { display: none !important; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
+  background: transparent;
   pointer-events: none;
 }
 
 .play-gate { z-index: 8; }
 
 .load-spin {
-  width: 40px;
-  height: 40px;
-  border: 3px solid #272727;
+  width: 48px;
+  height: 48px;
+  box-sizing: border-box;
+  border: 4px solid var(--hair, rgba(255, 255, 255, .28));
   border-top-color: #fff;
   border-radius: 50%;
   animation: gtspin 0.8s linear infinite;
@@ -468,30 +520,77 @@ body.hud-player .errbar { display: none !important; }
   to { transform: rotate(360deg); }
 }
 
+/* The title lives in the top band only, never over the picture. */
 .load-gate-title,
-.play-gate-title {
-  width: 520px;
-  margin-top: 16px;
-  font-size: 18px;
-  font-weight: 500;
-  color: #fff;
+.play-gate-title { display: none; }
+
+.load-gate-msg {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 340px;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  color: var(--t1, #fff);
   text-align: center;
 }
 
-.load-gate-msg,
-.play-gate-msg {
-  margin-top: 8px;
-  font-size: 15px;
-  font-weight: 700;
-  color: #fff;
+/* Gate: a 64px glyph and 'Pinch to play' inside a 3px white ring, no fill. */
+.play-gate-pill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 88px;
+  padding: 0 40px 0 24px;
+  box-sizing: border-box;
+  border: 3px solid var(--t1, #fff);
+  border-radius: 44px;
+  background: transparent;
+}
+
+.play-gate-glyph {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  flex: 0 0 auto;
+}
+
+.play-gate-glyph::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 10px;
+  border-style: solid;
+  border-width: 22px 0 22px 38px;
+  border-color: transparent transparent transparent var(--t1, #fff);
 }
 
 .play-gate-msg {
-  padding: 10px 22px;
-  background: #fff;
-  color: #0f0f0f;
-  border-radius: 18px;
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 700;
+  color: var(--t1, #fff);
+  background: transparent;
+  white-space: nowrap;
 }
+
+.play-gate-sub {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 364px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t2, #cfd3d9);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.play-gate-sub:empty { display: none; }
 
 .pair-code {
   font-size: 48px;
@@ -534,101 +633,177 @@ body.hud-player .errbar { display: none !important; }
   background: #000;
 }
 
-.player-meta {
-  padding: 12px 16px 8px;
-  box-sizing: border-box;
+/* ---- Player chrome: a top band (y 24-120) and a bottom band (y 480-576)
+   that fade in on any swipe and out 3s after playback resumes. ---------- */
+
+#player-chrome {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  opacity: 0;
+  transition: opacity 300ms cubic-bezier(.6, 0, .4, 1);
+  pointer-events: none;
+}
+
+#screen-player.chrome-on #player-chrome { opacity: 1; }
+
+#player-top {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 24px;
+  height: 96px;
 }
 
 #player-title {
   width: 100%;
-  font-size: 18px;
+  font-size: 28px;
   font-weight: 700;
-  color: #fff;
+  line-height: 34px;
+  max-height: 68px;
+  color: var(--t1, #fff);
   text-align: left;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  line-height: 1.3;
 }
 
 #player-channel {
   width: 100%;
-  font-size: 14px;
-  font-weight: 400;
-  color: #c9c9c9;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 28px;
+  color: var(--t2, #cfd3d9);
   text-align: left;
-  margin: 6px 0 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+#player-bottom {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 480px;
+  height: 96px;
 }
 
 #player-bar {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
-  z-index: 6;
-  width: 600px;
-  height: 3px;
+  top: 8px;
+  height: 6px;
   margin: 0;
-  background: rgba(255, 255, 255, 0.24);
-  border-radius: 0;
-  overflow: hidden;
+  background: var(--track, rgba(255, 255, 255, .22));
+  border-radius: 3px;
 }
 
-#player-fill {
-  height: 3px;
-  width: 0;
-  background: #ff0000;
+/* Fill and buffer are drawn with transform: scaleX, never width. */
+#player-fill,
+#player-buffer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+}
+
+#player-fill { background: var(--t1, #fff); }
+
+#player-knob {
+  position: absolute;
+  left: -7px;
+  top: -4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent, #ff3d3d);
+  transform: translateX(0);
+}
+
+.player-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 24px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 #player-time {
-  position: absolute;
-  left: 12px;
-  bottom: 10px;
-  z-index: 6;
-  width: auto;
+  flex: 0 0 auto;
   margin: 0;
-  font-size: 12px;
-  font-weight: 500;
-  color: #fff;
-  text-align: left;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 28px;
+  color: var(--t1, #fff);
+  font-variant-numeric: tabular-nums;
 }
 
+#player-seek {
+  flex: 0 0 auto;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 34px;
+  color: var(--t1, #fff);
+  font-variant-numeric: tabular-nums;
+}
+
+#player-seek:empty { display: none; }
+
 #player-next {
-  width: 100%;
-  margin-top: 10px;
-  font-size: 14px;
-  color: #c9c9c9;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 28px;
+  color: var(--t2, #cfd3d9);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Gesture legend: only while paused and in the first few sessions. */
+#player-hint {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 66px;
+  margin: 0;
+  padding: 0;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--t3, #aaafb9);
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-height: 18px;
+  background: transparent;
 }
 
-#player-hint {
-  width: 100%;
-  margin-top: 14px;
-  padding: 8px 12px;
-  font-size: 13px;
-  line-height: 1.35;
-  color: #c9c9c9;
-  text-align: left;
-  background: #212121;
-  border-radius: 8px;
-  box-sizing: border-box;
-}
+#screen-player.legend #player-hint { display: block; }
 
 #player-error {
   width: 100%;
-  font-size: 15px;
-  color: #ff8983;
-  text-align: left;
-  margin-top: 8px;
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 36px;
+  color: var(--t1, #fff);
+  text-align: center;
   white-space: pre-wrap;
   -webkit-user-select: text;
   user-select: text;
@@ -730,24 +905,7 @@ body.hud-player .errbar { display: none !important; }
 
 /* ---- Buffered-ahead shadow on the scrub bar ---------------------------- */
 
-#player-buffer {
-  position: absolute;
-  left: 0;
-  top: 0;
-  height: 3px;
-  width: 0;
-  background: rgba(255, 255, 255, 0.45);
-}
-
-#player-fill { position: relative; }
-
-.relay-offer { margin-top: 10px; }
-
-.relay-offer .back-btn {
-  color: #fff;
-  background: #212121;
-  border-radius: 8px;
-}
+#player-buffer { background: var(--buffer, rgba(255, 255, 255, .45)); }
 
 /* ---- The band-driven letter grid --------------------------------------- */
 
@@ -851,3 +1009,233 @@ body.hud-player .errbar { display: none !important; }
   color: #fff;
   box-shadow: 0 0 0 3px #fff;
 }
+
+/* WP7: player states. Dimming uses opacity, not filter, so the work stays on
+   the compositor and the light really drops. With the chrome hidden only the
+   video is lit. */
+
+#yt-slot > *,
+#yt-video,
+#yt-poster { transition: opacity 300ms cubic-bezier(.6, 0, .4, 1); }
+
+#screen-player.dim #yt-slot > *,
+#screen-player.dim #yt-video,
+#screen-player.dim #yt-poster { opacity: .35; }
+
+/* A short rebuffer mid-play shows nothing; only one that lasts over 1s does. */
+#screen-player.rebuffer:not(.stall) #load-gate { visibility: hidden; }
+
+body.hud-player .status { display: none !important; }
+
+/* WP7: final error. The picture goes away and a centred message says what
+   to do, in gesture words. */
+#player-fault {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 128px;
+  height: 344px;
+  z-index: 10;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  pointer-events: none;
+}
+
+#screen-player.fault #player-fault { display: flex; }
+#screen-player.fault #yt-wrap { visibility: hidden; }
+#screen-player.fault #player-bottom { display: none; }
+
+#player-error::before {
+  content: '!\00a0';
+  color: var(--err, #ff7a70);
+  font-weight: 800;
+}
+
+#player-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+#player-error.hidden + #player-actions { display: none; }
+
+.player-action {
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 30px;
+  color: var(--t2, #cfd3d9);
+  background: transparent;
+  border: 0;
+  text-align: center;
+  pointer-events: none;
+}
+
+.relay-offer { margin: 0; }
+
+/* WP7: up next. A 5s card in the bottom band, in place of the time row. */
+#player-upnext {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 24px;
+}
+
+#screen-player.upnext #player-upnext { display: block; }
+#screen-player.upnext .player-row,
+#screen-player.upnext #player-hint { display: none; }
+
+.upnext-line {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 28px;
+  color: var(--t1, #fff);
+}
+
+#upnext-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#upnext-count {
+  flex: 0 0 auto;
+  font-size: 28px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.upnext-hint {
+  margin-top: 8px;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--t3, #aaafb9);
+}
+
+/* WP7: player menu. Down opens it over the dimmed video; the bands step
+   aside so all seven rows fit. */
+#screen-player.menu-open #player-chrome { opacity: 0; }
+
+.player-menu {
+  position: absolute;
+  left: 60px;
+  top: 66px;
+  z-index: 12;
+  width: 480px;
+  padding: 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--surface, #1c1e21);
+  border-radius: 24px;
+}
+
+.pm-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 60px;
+  margin: 0;
+  padding: 0 20px;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 36px;
+  color: var(--t2, #cfd3d9);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 16px;
+  cursor: pointer;
+}
+
+#player-menu .pm-row:focus {
+  outline: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--t1, #fff);
+}
+
+#player-menu .pm-row::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 3px solid var(--t1, #fff);
+  border-radius: 16px;
+  opacity: 0;
+  transition: opacity 240ms cubic-bezier(.6, 0, .4, 1);
+  pointer-events: none;
+}
+
+#player-menu .pm-row:focus::after {
+  opacity: 1;
+  transition-duration: 180ms;
+}
+
+.pm-val {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 30px;
+  color: var(--t1, #fff);
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-val:empty { display: none; }
+
+.pm-cycle:focus .pm-val::before {
+  content: '\2039\00a0';
+  color: var(--t3, #aaafb9);
+}
+
+.pm-cycle:focus .pm-val::after {
+  content: '\00a0\203a';
+  color: var(--t3, #aaafb9);
+}
+
+.pm-row.pm-off { color: var(--t3, #aaafb9); }
+.pm-row.pm-off .pm-val { color: var(--t3, #aaafb9); }
+
+/* WP7 interim: toast lane (WP2 provides the full version; keep one). */
+.toast {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 52px;
+  z-index: 25;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 30px;
+  color: var(--t1, #fff);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* WP7: in the player, toasts sit on the last line of the bottom band, where
+   the legend would be, and the legend steps aside while one shows. */
+body.hud-player .toast {
+  top: auto;
+  bottom: 24px;
+}
+
+#stage:has(> #toast:not(.hidden)) #player-hint,
+#screen-player.toasting #player-hint { visibility: hidden; }

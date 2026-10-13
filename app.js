@@ -168,6 +168,9 @@ function markSet(id, t, duration) {
 
 function resumeAt(id) {
   const m = marksLoad()[id];
+  // Leaving a video in its first seconds stores no mark, but 'Resume' on the
+  // row it lands on must still pick up where the wearer left (WP7).
+  if (exitPoint && exitPoint.id === id && (!m || (m.at || 0) <= exitPoint.at)) return exitPoint.t;
   return (m && m.t) || 0;
 }
 
@@ -243,6 +246,8 @@ function pairKey() {
 
 function show(name) {
   if (current === 'player' && name !== 'player') {
+    noteExit();
+    playerUiReset();
     progressSave();
     if (typeof Player !== 'undefined') Player.destroy();
     nowPlaying = null;
@@ -312,6 +317,24 @@ function setStatus(msg, isErr) {
   el.classList.toggle('status-err', !!isErr);
 }
 
+/* interim: WP2 provides the full showToast (glyphs, lane, timing) and the
+   #toast element; this minimal one keeps WP7's player toasts working on its
+   own. Keep exactly one. */
+let toastTimer = 0;
+function showToast(text, kind, ms) {
+  let el = $('#toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    el.className = 'toast hidden';
+    ($('#stage') || document.body).appendChild(el);
+  }
+  el.textContent = text || '';
+  el.classList.toggle('hidden', !text);
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = text ? setTimeout(function () { el.classList.add('hidden'); }, ms || 4000) : 0;
+}
+
 function isNetErr(e) {
   return /failed to fetch|networkerror|offline|internet|load failed|not connected|HTTP 5/i
     .test(String((e && e.message) || e || ''));
@@ -341,7 +364,7 @@ function renderSettings() {
   renderSound();
   if ($('#captions-state')) $('#captions-state').textContent = prefs ? yn(prefs.captions()) : 'Off';
   if ($('#speed-state')) $('#speed-state').textContent = prefs ? prefs.speedLabel() : '1x';
-  if ($('#repeat-state')) $('#repeat-state').textContent = prefs ? prefs.repeatLabel() : 'All';
+  if ($('#repeat-state')) $('#repeat-state').textContent = prefs ? prefs.repeatLabel() : 'Off';
   if ($('#shuffle-state')) $('#shuffle-state').textContent = prefs ? yn(prefs.shuffle()) : 'Off';
   if ($('#picture-state')) $('#picture-state').textContent = (prefs && prefs.audioOnly()) ? 'Audio only' : 'Video';
   if ($('#sleep-state')) {
@@ -513,11 +536,17 @@ function renderHome() {
 function goBack() {
   if (current === 'list' && listBack) { listBack(); return; }
   if (current === 'player') {
+    noteExit();
+    playerUiReset();
     progressSave();
     if (typeof Player !== 'undefined') Player.destroy();
     nowPlaying = null;
-    if (queue.length && queueTitle() !== 'From iPhone' && queueTitle() !== 'From phone') {
-      showVideoList(queueTitle(), queue, listBack || (() => show('home')));
+    // WP7: a pushed queue lands on its 'From iPhone' list too, with the played
+    // row focused and labelled 'Resume · 12:34'. Back from there is Home.
+    if (queue.length) {
+      const pushed = !!(queue[0] && queue[0]._pushed);
+      showVideoList(queueTitle(), queue, pushed ? (() => show('home')) : (listBack || (() => show('home'))));
+      focusPlayedRow(exitPoint && exitPoint.id);
       return;
     }
     show('home');
@@ -547,6 +576,7 @@ function renderList(title, items, emptyText, onBack, backLabel, kind) {
     items.slice(0, MAX_LIST).forEach(item => {
       const btn = document.createElement('button');
       btn.className = 'focusable list-btn';
+      if (item.key) btn.dataset.key = item.key;
       if (item.thumb) {
         const shot = document.createElement('span');
         shot.className = 'list-shot';
@@ -605,6 +635,7 @@ function videoItems(videos, onPick) {
     const seen = markLabel(v.id);
     if (seen) bits.push(seen);
     return {
+      key: v.id,
       label: v.title || 'YouTube video',
       sub: bits.join(' · '),
       thumb: v.thumb,
@@ -645,12 +676,16 @@ function setLoading(on, title, text) {
   if (on) setPlayGate(false);
   if (name) name.textContent = title || (nowPlaying && nowPlaying.title) || 'YouTube video';
   if (msg) msg.textContent = netOffline ? 'No internet. Retrying...' : (text || 'Loading...');
+  queuePlayerPaint();
 }
 
-function setPlayGate(on, title, text) {
+/* The gate: a ring with 'Pinch to play' (or text), and an optional 22px line
+   under it. A pushed video says where it came from. */
+function setPlayGate(on, title, text, sub) {
   const gate = $('#play-gate');
   const name = $('#play-gate-title');
   const msg = $('#play-gate-msg');
+  const below = $('#play-gate-sub');
   if (!gate) return;
   gate.classList.toggle('hidden', !on);
   if (on) {
@@ -658,7 +693,12 @@ function setPlayGate(on, title, text) {
     if (load) load.classList.add('hidden');
   }
   if (name) name.textContent = title || (nowPlaying && nowPlaying.title) || 'YouTube video';
-  if (msg && text) msg.textContent = text;
+  if (msg && on) msg.textContent = text || 'Pinch to play';
+  if (below && on) {
+    below.textContent = sub !== undefined ? sub
+      : (nowPlaying && nowPlaying._pushed ? 'Sent from your iPhone' : '');
+  }
+  queuePlayerPaint();
 }
 
 /* Route memory. Whatever played last time is tried first next time, so a
@@ -766,7 +806,7 @@ function skipUnplayable(err, code) {
     const idx = (queueIndex + i) % queue.length;
     const v = queue[idx];
     if (v && v.id && !skipIds[v.id]) {
-      setStatus('Skipped one YouTube would not play.', false);
+      showToast('Skipped one YouTube would not play.', 'info');
       openPlayer(idx, true);
       return;
     }
@@ -774,10 +814,16 @@ function skipUnplayable(err, code) {
   setLoading(false);
   setPlayGate(false);
   blockedFor = (nowPlaying && nowPlaying.id) || '';
+  // The message replaces the picture, so nothing may keep playing under it.
+  if (typeof Player !== 'undefined' && Player.pause) Player.pause();
+  const why = failText(code, err);
   $('#player-error').textContent = queue.length > 1
-    ? 'Nothing in this list would play. ' + blockedText(code, err)
-    : blockedText(code, err);
+    ? 'Nothing in this list would play. ' + why
+    : why;
   $('#player-error').classList.remove('hidden');
+  showRelayOffer();
+  const nextAct = $('#player-action-next');
+  if (nextAct) nextAct.classList.toggle('hidden', queue.length < 2);
   updateChrome();
 }
 
@@ -813,15 +859,15 @@ function openPlayer(index, autoplay, startAt, opts) {
     wayFor = video.id;
   }
   if (blockedFor && blockedFor !== video.id) blockedFor = '';
+  if (current !== 'player') legendCount();
+  playerUiReset();
   nowPlaying = video;
   recentsAdd(video);
   $('#player-title').textContent = video.title || 'YouTube video';
-  $('#player-channel').textContent = [video.channel || '', video.meta || ''].filter(Boolean).join(' · ');
+  $('#player-channel').textContent = playerSubLine();
   $('#player-error').classList.add('hidden');
   $('#player-time').textContent = '0:00 / 0:00';
-  $('#player-fill').style.width = '0%';
-  const buf = $('#player-buffer');
-  if (buf) buf.style.width = '0%';
+  paintBar(0, 0);
   needGesture = false;
   setPlayGate(false);
   setLoading(true, video.title, wayPos === 0 ? 'Loading...' : 'Trying ' + routeLabel(wayChain[wayPos]) + '...');
@@ -833,7 +879,7 @@ function openPlayer(index, autoplay, startAt, opts) {
   }
   const attempt = wayPos;
   const route = wayChain[wayPos] || 'proxy';
-  Player.setHandlers(playNext, updateChrome);
+  Player.setHandlers(onVideoEnded, updateChrome);
   hudNote('route', { route: route, attempt: attempt, chain: wayChain.join('>'), hasU: !!video.u });
   Player.load(video, autoplay, startAt || 0, route).then(function (ok) {
     hudNote('loaded', { route: route, ok: !!ok, err: ok ? '' : String(Player.lastError() || ''),
@@ -857,7 +903,7 @@ function openPlayer(index, autoplay, startAt, opts) {
           error: snap.error || '', time: snap.time });
         if (snap.playing || snap.paused || snap.error) return;
         needGesture = true;
-        setPlayGate(true, video.title, 'Enter to play');
+        setPlayGate(true, video.title, 'Pinch to play');
         updateChrome();
       }, 3200);
       setTimeout(function () {
@@ -879,7 +925,7 @@ function openPlayer(index, autoplay, startAt, opts) {
 /* Warm the next video on the server route so the gap between tracks is a
    beat, not a stall. Harmless when the route ends up being the phone file. */
 function prefetchNext() {
-  const nxt = queue[queueIndex + 1] || (prefs && prefs.repeat() === 'all' ? queue[0] : null);
+  const nxt = queue[nextIndex(false)];
   if (!nxt || !nxt.id || nxt.id === (nowPlaying && nowPlaying.id)) return;
   if (nxt.u || prefetched[nxt.id]) return;
   prefetched[nxt.id] = true;
@@ -890,37 +936,54 @@ function prefetchNext() {
   } catch (e) { /* warming only */ }
 }
 
+/* The index the next video would come from, or -1 at the end of the list.
+   Repeat All wraps, but a queue pushed from the phone never does (WP7).
+   pick=true lets shuffle choose; false gives the predictable neighbour. */
+function nextIndex(pick) {
+  if (!queue.length) return -1;
+  if (pick && prefs && prefs.shuffle() && queue.length > 1) {
+    let n = queueIndex;
+    while (n === queueIndex) n = Math.floor(Math.random() * queue.length);
+    return n;
+  }
+  if (queueIndex + 1 < queue.length) return queueIndex + 1;
+  const pushed = !!(queue[0] && queue[0]._pushed);
+  if (prefs && prefs.repeat() === 'all' && queue.length > 1 && !pushed) return 0;
+  return -1;
+}
+
+/* A deliberate skip (the player menu's Next, or the error screen's swipe
+   down). It keeps each video's resume point. */
 function playNext() {
   if (!queue.length) return;
-  const mode = prefs ? prefs.repeat() : 'all';
-  if (mode === 'one') {
+  const n = nextIndex(true);
+  if (n < 0) {
+    showToast('End of list', 'info');
+    return;
+  }
+  openPlayer(n, true, resumeAt(queue[n] && queue[n].id));
+}
+
+/* Previous on the first video restarts it instead of wrapping. */
+function playPrev() {
+  if (queueIndex <= 0) {
+    restartVideo();
+    return;
+  }
+  const prev = queueIndex - 1;
+  openPlayer(prev, true, resumeAt(queue[prev] && queue[prev].id));
+}
+
+/* The video ran out: repeat one, a 5s 'Up next' card, or 'Finished'. */
+function onVideoEnded() {
+  if (current !== 'player') return;
+  if (prefs && prefs.repeat() === 'one') {
     openPlayer(queueIndex, true);
     return;
   }
-  if (prefs && prefs.shuffle() && queue.length > 1) {
-    let n = queueIndex;
-    while (n === queueIndex) n = Math.floor(Math.random() * queue.length);
-    openPlayer(n, true);
-    return;
-  }
-  if (queueIndex + 1 < queue.length) {
-    openPlayer(queueIndex + 1, true);
-    return;
-  }
-  if (mode === 'all' && queue.length > 1) {
-    openPlayer(0, true);
-    return;
-  }
-  setStatus('End of list.', false);
-}
-
-function playPrev() {
-  if (queue.length < 2) {
-    goBack();
-    return;
-  }
-  const prev = (queueIndex - 1 + queue.length) % queue.length;
-  openPlayer(prev, true);
+  const n = nextIndex(true);
+  if (n >= 0) startUpNext(n);
+  else showFinished();
 }
 
 /* A push from the phone. It can carry videos, a channel list, a channel to
@@ -964,7 +1027,7 @@ function applyPush(dest) {
     });
   }
   const ordered = maybeShuffle(list);
-  queue = ordered.map(v => Object.assign({}, v, { _listTitle: name }));
+  queue = ordered.map(v => Object.assign({}, v, { _listTitle: name, _pushed: true }));
   playlistRemember(name, list);
   diagSend('push', {
     id: (queue[0] && queue[0].id) || '',
@@ -999,35 +1062,22 @@ function openRelay() {
 function updateChrome() {
   if (current !== 'player' || typeof Player === 'undefined') return;
   const snap = Player.snapshot();
-  $('#player-time').textContent = fmtTime(snap.time) + ' / ' + fmtTime(snap.duration);
-  const pct = snap.duration ? Math.min(100, (snap.time / snap.duration) * 100) : 0;
-  $('#player-fill').style.width = pct + '%';
-  const buf = $('#player-buffer');
-  if (buf) {
-    const bpct = snap.duration ? Math.min(100, (snap.buffered / snap.duration) * 100) : 0;
-    buf.style.width = bpct + '%';
-  }
-  const pos = queue.length > 1 ? ((queueIndex + 1) + '/' + queue.length + ' · ') : '';
-  const nxt = queue[queueIndex + 1] || (prefs && prefs.repeat() === 'all' ? queue[0] : null);
-  let phase = 'Loading';
-  if (snap.playing) phase = 'Enter pause';
-  else if (snap.error && nowPlaying && blockedFor === nowPlaying.id) phase = 'Blocked';
-  else if (snap.error) phase = 'Trying another way';
-  else if (snap.paused) phase = 'Paused · Enter play';
-  else if (snap.ended) phase = 'Ended · Enter play';
-  else if (needGesture) phase = 'Enter to play';
-  else if (snap.buffering) phase = 'Buffering';
-  $('#player-hint').textContent = pos + phase +
-    (queue.length > 1 ? ' · Up last · Down next' : ' · Up -10s') +
-    ' · Left back · Right +10s';
-  if ($('#player-next')) {
-    $('#player-next').textContent = nxt && nxt.title && queue.length > 1
-      ? ('Next: ' + String(nxt.title).slice(0, 44))
-      : '';
-  }
+  queuePlayerPaint();
+  setText('#player-time', fmtTime(snap.time) + ' / ' + fmtTime(snap.duration));
+  paintBar(snap.duration ? snap.time / snap.duration : 0, snap.duration ? snap.buffered / snap.duration : 0);
+  setText('#player-channel', playerSubLine());
+  // The legend is static copy in index.html; 'Next: …' is ellipsized by CSS.
+  const nxt = queue.length > 1 ? queue[nextIndex(false)] : null;
+  setText('#player-next', nxt && nxt.title ? 'Next: ' + nxt.title : '');
   const title = nowPlaying && nowPlaying.title;
+  const scr = screens.player;
+  if (!(snap.buffering && snap.time > 0.4)) {
+    bufferSince = 0;
+    if (scr) scr.classList.remove('rebuffer', 'stall');
+  }
   if (snap.playing) {
     needGesture = false;
+    finished = false;
     setLoading(false);
     setPlayGate(false);
     $('#player-error').textContent = '';
@@ -1061,10 +1111,18 @@ function updateChrome() {
     }
   } else if (snap.paused || snap.ended) {
     needGesture = false;
-    setPlayGate(true, title, snap.ended ? 'Ended · Enter to play' : 'Paused · Enter to play');
+    if (upNextIdx >= 0) setPlayGate(false);
+    else if (finished) setPlayGate(true, title, 'Finished', 'Pinch to replay · swipe left to exit');
+    else setPlayGate(true, title, 'Pinch to play', '');
   } else if (needGesture) {
-    setPlayGate(true, title, 'Enter to play');
+    setPlayGate(true, title, 'Pinch to play');
   } else if (snap.buffering && snap.time > 0.4) {
+    // A short rebuffer stays invisible; one over 1s shows the spinner and chrome.
+    if (!bufferSince) bufferSince = Date.now();
+    if (scr) {
+      scr.classList.add('rebuffer');
+      scr.classList.toggle('stall', Date.now() - bufferSince > 1000);
+    }
     setLoading(true, title, 'Buffering...');
   } else {
     setLoading(true, title, 'Loading...');
@@ -1080,6 +1138,427 @@ function showRelayOffer() {
 function hideRelayOffer() {
   const box = $('#player-relay');
   if (box) box.classList.add('hidden');
+}
+
+/* ---- WP7: player chrome, dimming, seek feedback, menu, up next, exit ----
+   Only the video is lit while it plays. Any swipe brings the top and bottom
+   bands back for 3s; the gate, a pause, an error and a long stall keep them.
+   UI timers tick at most once a second, never per frame. */
+let exitPoint = null; // { id, t, at } of the video the wearer just left
+let chromeTimer = 0;
+let paintTimer = 0;
+let bufferSince = 0;
+let seekDir = 0;
+let seekAt = 0;
+let seekStep = 0;
+let seekTimer = 0;
+let leaveArmedAt = 0;
+let menuTimer = 0;
+let upNextTimer = 0;
+let upNextIdx = -1;
+let upNextLeft = 0;
+let finished = false;
+const CHROME_HOLD_MS = 3000;
+const FINISHED_HOLD_MS = 10000;
+const LEAVE_WINDOW_MS = 2500;
+const MENU_IDLE_MS = 6000;
+const UPNEXT_S = 5;
+const LEGEND_KEY = 'glasstube.legend';
+const LEGEND_SESSIONS = 3;
+
+function setText(sel, text) {
+  const el = $(sel);
+  if (el && el.textContent !== text) el.textContent = text;
+}
+
+/* Fill and buffer are scaleX transforms; the knob rides on translateX. */
+function paintBar(frac, bufFrac) {
+  const f = Math.max(0, Math.min(1, frac || 0));
+  const b = Math.max(0, Math.min(1, bufFrac || 0));
+  const fill = $('#player-fill');
+  const buf = $('#player-buffer');
+  const knob = $('#player-knob');
+  const bar = $('#player-bar');
+  if (fill) fill.style.transform = 'scaleX(' + f.toFixed(4) + ')';
+  if (buf) buf.style.transform = 'scaleX(' + b.toFixed(4) + ')';
+  if (knob) knob.style.transform = 'translateX(' + Math.round(f * ((bar && bar.clientWidth) || 552)) + 'px)';
+}
+
+/* 'Channel · 2 of 5 · 1.5x · Sleep 12m' */
+function playerSubLine() {
+  const bits = [];
+  if (nowPlaying && nowPlaying.channel) bits.push(nowPlaying.channel);
+  if (queue.length > 1 && queueIndex >= 0) bits.push((queueIndex + 1) + ' of ' + queue.length);
+  if (prefs && prefs.speed() !== 1) bits.push(prefs.speedLabel());
+  if (sound && !sound.enabled()) bits.push('Sound off');
+  if (sleepUntil) bits.push('Sleep ' + Math.max(1, Math.ceil((sleepUntil - Date.now()) / 60000)) + 'm');
+  return bits.join(' · ');
+}
+
+/* One sentence for the final error. WP5's bestFailText picks the most useful
+   failure for this video; until it lands, blockedText answers. */
+function failText(code, err) {
+  if (typeof bestFailText === 'function') {
+    const id = (nowPlaying && nowPlaying.id) || '';
+    const mine = playFails.filter(function (f) { return f.indexOf(id + ' · ') === 0; });
+    const t = bestFailText(mine);
+    if (t) return t;
+  }
+  return blockedText(code, err);
+}
+
+function playerFault() {
+  return !!(nowPlaying && blockedFor && blockedFor === nowPlaying.id);
+}
+
+function menuIsOpen() {
+  const m = $('#player-menu');
+  return !!(m && !m.classList.contains('hidden'));
+}
+
+/* The first few times in the player, the gesture legend shows with the
+   chrome; after that only while paused. */
+function legendCount() {
+  try {
+    const n = Number(localStorage.getItem(LEGEND_KEY) || 0) || 0;
+    if (n <= LEGEND_SESSIONS) localStorage.setItem(LEGEND_KEY, String(n + 1));
+  } catch (e) { /* private mode */ }
+}
+
+function legendFresh() {
+  try { return (Number(localStorage.getItem(LEGEND_KEY) || 0) || 0) <= LEGEND_SESSIONS; }
+  catch (e) { return false; }
+}
+
+function queuePlayerPaint() {
+  if (paintTimer) return;
+  paintTimer = setTimeout(function () {
+    paintTimer = 0;
+    paintPlayer();
+  }, 0);
+}
+
+/* States that keep the chrome up: the gate, a pause, the final error, a
+   stall over 1s, the up next card, and loading before the first frame. */
+function chromeSticky(snap) {
+  const scr = screens.player;
+  const gate = $('#play-gate');
+  const load = $('#load-gate');
+  const gateOn = !!(gate && !gate.classList.contains('hidden')) && !finished;
+  const loadOn = !!(load && !load.classList.contains('hidden')) &&
+    !(scr && scr.classList.contains('rebuffer') && !scr.classList.contains('stall'));
+  return gateOn || loadOn || !!snap.paused || playerFault() || upNextIdx >= 0;
+}
+
+function paintPlayer() {
+  const scr = screens.player;
+  if (!scr || current !== 'player' || typeof Player === 'undefined') return;
+  const snap = Player.snapshot();
+  const gate = $('#play-gate');
+  const gateOn = !!(gate && !gate.classList.contains('hidden'));
+  const fault = playerFault();
+  scr.classList.toggle('fault', fault);
+  scr.classList.toggle('dim', gateOn || !!snap.paused || menuIsOpen() || fault || finished || upNextIdx >= 0);
+  scr.classList.toggle('legend', !!snap.paused || legendFresh());
+  if (chromeSticky(snap)) {
+    scr.classList.add('chrome-on');
+    if (chromeTimer && !finished) {
+      clearTimeout(chromeTimer);
+      chromeTimer = 0;
+    }
+  } else if (scr.classList.contains('chrome-on') && !chromeTimer) {
+    armChromeHide(CHROME_HOLD_MS);
+  }
+}
+
+function armChromeHide(ms) {
+  if (chromeTimer) clearTimeout(chromeTimer);
+  chromeTimer = setTimeout(function () {
+    chromeTimer = 0;
+    const scr = screens.player;
+    if (current !== 'player' || !scr || typeof Player === 'undefined') return;
+    const snap = Player.snapshot();
+    if (chromeSticky(snap)) return;
+    // Hidden only while the picture plays (or the list has finished); paint
+    // re-arms this when playback resumes.
+    if (snap.playing || finished) scr.classList.remove('chrome-on');
+  }, ms || CHROME_HOLD_MS);
+}
+
+function chromeShow() {
+  const scr = screens.player;
+  if (!scr) return;
+  scr.classList.add('chrome-on');
+  armChromeHide(CHROME_HOLD_MS);
+  queuePlayerPaint();
+}
+
+/* Everything WP7 adds is per video; a new video or leaving starts clean. */
+function playerUiReset() {
+  closePlayerMenu();
+  cancelUpNext();
+  finished = false;
+  bufferSince = 0;
+  leaveArmedAt = 0;
+  if (chromeTimer) clearTimeout(chromeTimer);
+  chromeTimer = 0;
+  if (seekTimer) clearTimeout(seekTimer);
+  seekTimer = 0;
+  setText('#player-seek', '');
+  const scr = screens.player;
+  if (scr) {
+    scr.classList.remove('dim', 'fault', 'upnext', 'menu-open', 'rebuffer', 'stall');
+    scr.classList.add('chrome-on');
+  }
+  const nextAct = $('#player-action-next');
+  if (nextAct) nextAct.classList.add('hidden');
+  hideRelayOffer();
+}
+
+/* Where the wearer left, so the list can say 'Resume · 12:34'. Near the end
+   counts as finished, so it resumes from the start. */
+function noteExit() {
+  if (!nowPlaying || !nowPlaying.id || typeof Player === 'undefined') return;
+  const snap = Player.snapshot();
+  let t = snap.time || 0;
+  if (snap.ended || (snap.duration && snap.duration - t < NEAR_END_S)) t = 0;
+  exitPoint = { id: nowPlaying.id, t: Math.floor(t), at: Date.now() };
+}
+
+/* Leaving the player focuses the row that was playing. interim: WP3's
+   popstate focus restore (by data-key) supersedes the focus part. */
+function focusPlayedRow(id) {
+  if (!id || current !== 'list') return;
+  const rows = document.querySelectorAll('#list-items [data-key]');
+  let row = null;
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].dataset.key === id) { row = rows[i]; break; }
+  }
+  if (!row) return;
+  const t = resumeAt(id);
+  if (t >= 1) {
+    const copy = row.querySelector('.list-copy');
+    let sub = copy && copy.querySelector('small');
+    if (copy && !sub) {
+      sub = document.createElement('small');
+      copy.appendChild(sub);
+    }
+    if (sub) sub.textContent = 'Resume · ' + fmtTime(t);
+  }
+  row.focus();
+  reveal(row);
+}
+
+/* Seek with feedback: '+10s' in the bottom band for 900ms. Repeats in the
+   same direction within 1s go to 30s, then 60s. */
+function seekBy(dir) {
+  if (typeof Player === 'undefined') return;
+  const now = Date.now();
+  if (dir === seekDir && now - seekAt < 1000) seekStep = seekStep >= 30 ? 60 : 30;
+  else seekStep = 10;
+  seekDir = dir;
+  seekAt = now;
+  Player.seek(dir * seekStep);
+  setText('#player-seek', (dir > 0 ? '+' : '−') + seekStep + 's');
+  if (seekTimer) clearTimeout(seekTimer);
+  seekTimer = setTimeout(function () {
+    seekTimer = 0;
+    setText('#player-seek', '');
+  }, 900);
+  updateChrome();
+}
+
+function restartVideo() {
+  if (typeof Player === 'undefined') return;
+  finished = false;
+  cancelUpNext();
+  Player.seek(-1e7);
+  const snap = Player.snapshot();
+  if (snap.paused || snap.ended) Player.toggle();
+  setPlayGate(false);
+  updateChrome();
+}
+
+/* Pinch: play or pause. When WP5 muted playback by policy, a pinch turns the
+   sound on instead of pausing. */
+function playerPinch() {
+  if (typeof Player === 'undefined') return;
+  const snap = Player.snapshot();
+  const policyMuted = (typeof mutedByPolicy !== 'undefined' && !!mutedByPolicy) || !!snap.mutedByPolicy;
+  if (policyMuted && snap.playing) {
+    if (typeof Player.unlock === 'function') Player.unlock();
+    Player.applySound(true);
+    return;
+  }
+  if (finished) {
+    finished = false;
+    setPlayGate(false);
+    openPlayer(0, true, 0);
+    return;
+  }
+  needGesture = false;
+  Player.toggle();
+  setPlayGate(false);
+  updateChrome();
+}
+
+/* Left is guarded: the first one shows the chrome and asks; a second within
+   2.5s leaves. System Back (a back key, or WP3's popstate) leaves at once. */
+function guardedLeave() {
+  const now = Date.now();
+  if (leaveArmedAt && now - leaveArmedAt < LEAVE_WINDOW_MS) {
+    leaveArmedAt = 0;
+    leavePlayer();
+    return;
+  }
+  leaveArmedAt = now;
+  chromeShow();
+  showToast('Swipe left again to leave', 'info', LEAVE_WINDOW_MS);
+}
+
+function leavePlayer() {
+  leaveArmedAt = 0;
+  showToast('');
+  goBack();
+}
+
+/* ---- Up next and the end of the list --------------------------------- */
+
+function startUpNext(n) {
+  cancelUpNext();
+  const v = queue[n];
+  if (!v) return;
+  upNextIdx = n;
+  upNextLeft = UPNEXT_S;
+  setText('#upnext-title', 'Up next: ' + (v.title || 'YouTube video'));
+  setText('#upnext-count', String(upNextLeft));
+  if (screens.player) screens.player.classList.add('upnext');
+  setPlayGate(false);
+  chromeShow();
+  upNextTimer = setInterval(function () {
+    upNextLeft -= 1;
+    if (upNextLeft <= 0) {
+      playUpNext();
+      return;
+    }
+    setText('#upnext-count', String(upNextLeft));
+  }, 1000);
+}
+
+function playUpNext() {
+  const n = upNextIdx;
+  cancelUpNext();
+  if (n >= 0 && queue[n]) openPlayer(n, true, resumeAt(queue[n].id));
+}
+
+function cancelUpNext() {
+  if (upNextTimer) clearInterval(upNextTimer);
+  upNextTimer = 0;
+  upNextIdx = -1;
+  if (screens.player) screens.player.classList.remove('upnext');
+}
+
+function showFinished() {
+  cancelUpNext();
+  finished = true;
+  setLoading(false);
+  setPlayGate(true, nowPlaying && nowPlaying.title, 'Finished', 'Pinch to replay · swipe left to exit');
+  const scr = screens.player;
+  if (scr) scr.classList.add('chrome-on');
+  armChromeHide(FINISHED_HOLD_MS);
+  queuePlayerPaint();
+}
+
+/* ---- Player menu: Down opens it over the dimmed video ------------------ */
+
+function renderPlayerMenu() {
+  const n = queue.length > 1 ? nextIndex(false) : -1;
+  const nextRow = document.querySelector('#player-menu [data-act="next"]');
+  if (nextRow) nextRow.classList.toggle('pm-off', n < 0 && !(prefs && prefs.shuffle() && queue.length > 1));
+  setText('#pm-next', n >= 0 ? (n + 1) + ' of ' + queue.length : '');
+  setText('#pm-speed', prefs ? prefs.speedLabel() : '1x');
+  setText('#pm-sound', sound && !sound.enabled() ? 'Off' : 'On');
+  setText('#pm-picture', prefs && prefs.audioOnly() ? 'Audio only' : 'Video');
+  const mins = prefs ? prefs.sleep() : 0;
+  setText('#pm-sleep', mins ? (prefs.sleepLabel ? prefs.sleepLabel() : mins + 'm') : 'Off');
+}
+
+function armMenuIdle() {
+  if (menuTimer) clearTimeout(menuTimer);
+  menuTimer = setTimeout(function () {
+    menuTimer = 0;
+    closePlayerMenu();
+  }, MENU_IDLE_MS);
+}
+
+function openPlayerMenu() {
+  const m = $('#player-menu');
+  if (!m) return;
+  renderPlayerMenu();
+  m.classList.remove('hidden');
+  if (screens.player) screens.player.classList.add('menu-open');
+  const first = m.querySelector('[data-act="next"]');
+  if (first) first.focus();
+  armMenuIdle();
+  queuePlayerPaint();
+}
+
+function closePlayerMenu() {
+  const m = $('#player-menu');
+  if (menuTimer) clearTimeout(menuTimer);
+  menuTimer = 0;
+  if (!m || m.classList.contains('hidden')) return;
+  m.classList.add('hidden');
+  if (screens.player) screens.player.classList.remove('menu-open');
+  const a = document.activeElement;
+  if (a && m.contains(a) && a.blur) a.blur();
+  if (current === 'player') chromeShow();
+}
+
+function menuKey(k) {
+  const m = $('#player-menu');
+  const rows = Array.prototype.slice.call(m.querySelectorAll('.pm-row'));
+  let i = rows.indexOf(document.activeElement);
+  if (i < 0) i = 0;
+  armMenuIdle();
+  if (k === 'left' || k === 'back') { closePlayerMenu(); return; }
+  if (k === 'up') { rows[Math.max(0, i - 1)].focus(); return; }
+  if (k === 'down') { rows[Math.min(rows.length - 1, i + 1)].focus(); return; }
+  if (k === 'right' && !rows[i].classList.contains('pm-cycle')) return;
+  menuAct(rows[i]);
+}
+
+/* Values apply live through Player.applyAll(); playback is never rebuilt. */
+function menuAct(row) {
+  const act = row && row.getAttribute('data-act');
+  const live = function () {
+    if (typeof Player !== 'undefined' && Player.applyAll) Player.applyAll();
+    renderPlayerMenu();
+    updateChrome();
+  };
+  if (act === 'next') {
+    closePlayerMenu();
+    playNext();
+  } else if (act === 'prev') {
+    closePlayerMenu();
+    playPrev();
+  } else if (act === 'restart') {
+    closePlayerMenu();
+    restartVideo();
+  } else if (act === 'speed' && prefs) {
+    prefs.cycleSpeed();
+    live();
+  } else if (act === 'sound' && sound) {
+    sound.setEnabled(!sound.enabled());
+    live();
+  } else if (act === 'picture' && prefs) {
+    prefs.setAudioOnly(!prefs.audioOnly());
+    live();
+  } else if (act === 'sleep' && prefs) {
+    prefs.cycleSleep();
+    armSleep();
+    live();
+  }
 }
 
 function openRecents() {
@@ -1683,38 +2162,50 @@ function runSelfTest() {
     });
 }
 
+/* Swipe-proof: no single swipe skips or quits a video (WP7).
+   Pinch play/pause · Right +10s · Up -10s · Down menu · Left twice to leave. */
 function handlePlayerKey(e) {
   const key = e.key;
-  if (isBackKey(key) || key === DPAD.LEFT) {
-    e.preventDefault();
-    goBack();
+  let k = '';
+  if (isBackKey(key)) k = 'back';
+  else if (key === DPAD.LEFT) k = 'left';
+  else if (key === DPAD.RIGHT) k = 'right';
+  else if (key === DPAD.UP || key === 'Up' || e.code === 'ArrowUp') k = 'up';
+  else if (key === DPAD.DOWN || key === 'Down' || e.code === 'ArrowDown') k = 'down';
+  else if (key === DPAD.SELECT || key === ' ') k = 'pinch';
+  if (!k) return;
+  e.preventDefault();
+  if (k !== 'left') leaveArmedAt = 0;
+  if (menuIsOpen()) {
+    menuKey(k);
     return;
   }
-  if (key === DPAD.SELECT || key === ' ') {
-    e.preventDefault();
-    needGesture = false;
-    if (typeof Player !== 'undefined') Player.toggle();
-    setPlayGate(false);
-    updateChrome();
+  if (k === 'back') {
+    leavePlayer();
     return;
   }
-  if (key === DPAD.RIGHT) {
-    e.preventDefault();
-    if (typeof Player !== 'undefined') Player.seek(10);
-    updateChrome();
+  chromeShow();
+  if (upNextIdx >= 0) {
+    // Up next: pinch plays now, Left cancels (and arms the guarded exit).
+    if (k === 'pinch') playUpNext();
+    else if (k === 'left') {
+      cancelUpNext();
+      updateChrome();
+      guardedLeave();
+    }
     return;
   }
-  if (key === DPAD.UP || key === 'Up' || e.code === 'ArrowUp') {
-    e.preventDefault();
-    if (queue.length > 1) playPrev();
-    else if (typeof Player !== 'undefined') Player.seek(-10);
-    updateChrome();
+  if (playerFault()) {
+    // Final error: every action on screen is one gesture.
+    if (k === 'pinch') openRelay();
+    else if (k === 'down' && queue.length > 1) openPlayer((queueIndex + 1) % queue.length, true);
+    else if (k === 'left') leavePlayer();
     return;
   }
-  if (key === DPAD.DOWN || key === 'Down' || e.code === 'ArrowDown') {
-    e.preventDefault();
-    playNext();
-  }
+  if (k === 'left') { guardedLeave(); return; }
+  if (k === 'down') { openPlayerMenu(); return; }
+  if (k === 'pinch') { playerPinch(); return; }
+  seekBy(k === 'right' ? 1 : -1);
 }
 
 function handleSearchKey(e) {

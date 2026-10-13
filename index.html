@@ -139,8 +139,6 @@ window.addEventListener('unhandledrejection', function (e) {
   <div id="yt-wrap">
     <div id="yt-slot"><iframe id="yt-host" src="about:blank" referrerpolicy="origin" allow="autoplay; encrypted-media; picture-in-picture" tabindex="-1"></iframe></div>
     <img id="yt-poster" alt="">
-    <div id="player-bar"><div id="player-buffer"></div><div id="player-fill"></div></div>
-    <div id="player-time">0:00 / 0:00</div>
     <div id="load-gate" class="load-gate">
       <div class="load-spin"></div>
       <div id="load-gate-title" class="load-gate-title">YouTube video</div>
@@ -148,18 +146,43 @@ window.addEventListener('unhandledrejection', function (e) {
     </div>
     <div id="play-gate" class="play-gate hidden">
       <div id="play-gate-title" class="play-gate-title"></div>
-      <div id="play-gate-msg" class="play-gate-msg">Enter to play</div>
+      <div class="play-gate-pill"><span class="play-gate-glyph" aria-hidden="true"></span><span id="play-gate-msg" class="play-gate-msg">Pinch to play</span></div>
+      <div id="play-gate-sub" class="play-gate-sub"></div>
     </div>
   </div>
-  <div class="player-meta">
-    <div id="player-title">Loading...</div>
-    <div id="player-channel"></div>
-    <div id="player-next"></div>
-    <div id="player-hint">Enter play · Up last · Down next · Left back · Right +10s</div>
-    <div id="player-error" class="hidden"></div>
-    <div id="player-relay" class="hidden relay-offer">
-      <button class="focusable back-btn" id="btn-relay">Play from the phone instead<span class="back-hint">leaves the HUD</span></button>
+  <div id="player-chrome">
+    <div id="player-top">
+      <div id="player-title">Loading...</div>
+      <div id="player-channel"></div>
     </div>
+    <div id="player-bottom">
+      <div id="player-bar"><div id="player-buffer"></div><div id="player-fill"></div><div id="player-knob"></div></div>
+      <div class="player-row"><span id="player-time">0:00 / 0:00</span><span id="player-seek"></span><span id="player-next"></span></div>
+      <div id="player-hint">pinch pause · &#x25B6;&#xFE0E; +10s · &#x25B2;&#xFE0E; &minus;10s · &#x25BC;&#xFE0E; menu · &#x25C0;&#xFE0E;&#x25C0;&#xFE0E; exit</div>
+      <div id="player-upnext">
+        <div class="upnext-line"><span id="upnext-title"></span><span id="upnext-count"></span></div>
+        <div class="upnext-hint">pinch play now · &#x25C0;&#xFE0E; cancel</div>
+      </div>
+    </div>
+  </div>
+  <div id="player-fault">
+    <div id="player-error" class="hidden"></div>
+    <div id="player-actions">
+      <div id="player-relay" class="hidden relay-offer">
+        <button class="player-action" id="btn-relay" tabindex="-1">Pinch: play from phone</button>
+      </div>
+      <div id="player-action-next" class="player-action hidden">Swipe down: next video</div>
+      <div class="player-action">Swipe left: back</div>
+    </div>
+  </div>
+  <div id="player-menu" class="player-menu hidden">
+    <button class="focusable pm-row" data-act="next">Next video<span class="pm-val" id="pm-next"></span></button>
+    <button class="focusable pm-row" data-act="prev">Previous</button>
+    <button class="focusable pm-row" data-act="restart">Restart</button>
+    <button class="focusable pm-row pm-cycle" data-act="speed">Speed<span class="pm-val" id="pm-speed">1x</span></button>
+    <button class="focusable pm-row pm-cycle" data-act="sound">Sound<span class="pm-val" id="pm-sound">On</span></button>
+    <button class="focusable pm-row pm-cycle" data-act="picture">Picture<span class="pm-val" id="pm-picture">Video</span></button>
+    <button class="focusable pm-row pm-cycle" data-act="sleep">Sleep timer<span class="pm-val" id="pm-sleep">Off</span></button>
   </div>
 </section>
 
@@ -196,7 +219,7 @@ window.addEventListener('unhandledrejection', function (e) {
     <button class="focusable menu-btn" id="btn-sound">Sound<small id="sound-state">On</small></button>
     <button class="focusable menu-btn" id="btn-captions">Captions<small id="captions-state">Off</small></button>
     <button class="focusable menu-btn" id="btn-speed">Speed<small id="speed-state">1x</small></button>
-    <button class="focusable menu-btn" id="btn-repeat">Repeat<small id="repeat-state">All</small></button>
+    <button class="focusable menu-btn" id="btn-repeat">Repeat<small id="repeat-state">Off</small></button>
     <button class="focusable menu-btn" id="btn-shuffle">Shuffle<small id="shuffle-state">Off</small></button>
     <button class="focusable menu-btn" id="btn-picture">Picture<small id="picture-state">Video</small></button>
     <button class="focusable menu-btn" id="btn-sleep">Sleep timer<small id="sleep-state">Off</small></button>

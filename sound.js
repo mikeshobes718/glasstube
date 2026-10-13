@@ -15,3 +15,7 @@ const GlassSound = (() => {
     },
   };
 })();
+
+/* interim: WP5 makes player.js read GlassSound directly; until then this alias
+   lets the player menu's Sound row reach the playing video. */
+if (typeof window !== 'undefined') window.GlassSound = GlassSound;
