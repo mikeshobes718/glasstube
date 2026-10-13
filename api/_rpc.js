@@ -6,7 +6,10 @@ export async function rpc(name, args) {
   const base = (process.env.GLASSTUBE_SUPABASE_URL || '').trim().replace(/\/$/, '');
   const key = (process.env.GLASSTUBE_SUPABASE_KEY || '').trim();
   if (!base || !key) throw new Error('pairing backend not configured');
-  const r = await fetch(base + '/rest/v1/rpc/' + name, {
+  const path = base.includes('api.atberth.com')
+    ? base + '/rpc/' + name
+    : base + '/rest/v1/rpc/' + name;
+  const r = await fetch(path, {
     method: 'POST',
     headers: {
       apikey: key,

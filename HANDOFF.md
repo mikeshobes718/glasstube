@@ -222,3 +222,23 @@ wildcard profile cannot carry Sign In with Apple (added with the Berth work),
 so the script builds unsigned and signs with the ASC-made profiles in
 `ios/signing/` (gitignored). The signing cert expires 2027-07-24; remake them with
 `~/Documents/Cook/scripts/asc.py` and the key in `~/Documents/Keys/.env`.
+
+### Glasses HUD overhaul, 2026-10-13 (to the cloud session)
+
+The plan is `docs/hud-plan/PLAN.md` (8 work packages, WP1 to WP8, design
+system, platform research incl. Meta's official toolkit values). Every
+finding with evidence is in `docs/hud-plan/audit.json`. Judge visuals with
+`scripts/hudshot.mjs --additive` (it stubs pairing locally and can fake a
+phone push with `--push <videoId>`), never by reading CSS alone.
+
+Rules that bit us:
+- `api/_rpc.js` routes pairing to Berth (`api.atberth.com`). It is live.
+  Any deploy without it breaks pairing for everyone.
+- The glasses keep the loaded page for days. Nothing deployed reaches them
+  until WP1's self-update lands, or Mike uses Restart in the web app menu.
+- `node scripts/selftest.mjs` before and after anything in the play path.
+- The iPhone app cannot be built or installed from the cloud (no signing,
+  no device). iOS changes go in a branch for the Mac to build with
+  `ios/install.sh`.
+- Uncommitted iOS work (Berth account sync: Berth.swift, SyncAccountView.swift,
+  Store.swift...) lives only on the Mac and belongs to another chat.
