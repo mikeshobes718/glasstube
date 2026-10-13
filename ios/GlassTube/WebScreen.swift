@@ -1255,6 +1255,15 @@ enum StreamResolver {
         config.timeoutIntervalForRequest = 12
         return URLSession(configuration: config)
     }()
+    /// The push waits on the server for the glasses to confirm playback (up to
+    /// about 13s, WP6), so it gets its own session with room for that instead
+    /// of the 12s silence limit the resolve calls use.
+    private static let pushSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.waitsForConnectivity = true
+        config.timeoutIntervalForRequest = 30
+        return URLSession(configuration: config)
+    }()
 
     static func url(for id: String, session blob: String? = nil) -> String? {
         let trimmed = id.filter { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }
@@ -1397,7 +1406,7 @@ enum StreamResolver {
         req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         let sem = DispatchSemaphore(value: 0)
         var out: [String: Any] = ["ok": false, "error": "No response from GlassTube.", "network": true]
-        session.dataTask(with: req) { data, resp, err in
+        pushSession.dataTask(with: req) { data, resp, err in
             defer { sem.signal() }
             if err != nil {
                 out = ["ok": false, "error": "No internet. Retrying...", "network": true]
@@ -1411,7 +1420,7 @@ enum StreamResolver {
                 out = ["ok": false, "error": "Server error \(code)", "network": code >= 500]
             }
         }.resume()
-        _ = sem.wait(timeout: .now() + 20)
+        _ = sem.wait(timeout: .now() + 32)
         out["hasFile"] = hasFile
         out["urlLen"] = payloadUrlLen(payload)
         out["itag"] = itag(payload["u"] as? String)
