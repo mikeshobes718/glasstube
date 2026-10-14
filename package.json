@@ -3,5 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "YouTube HUD for Meta Ray-Ban Display glasses"
+  "description": "YouTube HUD for Meta Ray-Ban Display glasses",
+  "scripts": {
+    "stamp": "node scripts/stamp.mjs",
+    "deploy": "node scripts/stamp.mjs && vercel --prod"
+  }
 }

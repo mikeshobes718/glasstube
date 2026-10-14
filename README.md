@@ -73,8 +73,20 @@ time either device spoke — so reopening the phone app reconnects on its own,
 even after the code itself has expired. The code is short lived on purpose:
 it is short enough to read off a HUD, which also makes it short enough to guess.
 
-"New code" on the glasses drops the link as well, which is how you move the
-glasses to a different phone.
+"Link a different phone" on the glasses (From iPhone, two pinches) drops the
+link as well, which is how you move the glasses to a different phone.
+
+## Updates reach the glasses on their own
+
+`npm run deploy` runs `scripts/stamp.mjs` and then `vercel --prod`. The stamp
+gives every file the page loads a content hash (`?v=`) and writes one build id
+into `index.html` and `api/_build.js`; `/api/pair` returns it on every poll. A
+HUD that sees a different build reloads itself the next time it sits idle on
+Home for 20 seconds, or the moment the wearer reopens GlassTube, never in the
+player or mid-search, and at most once per build. The new build shows as
+`v<build>` on Home for three seconds after launch, and Diagnostics lists the
+build, the server's build and the last poll. A page from before this existed
+needs one manual restart: middle-finger tap on the home screen, then Restart.
 
 ## Not breaking it again
 
