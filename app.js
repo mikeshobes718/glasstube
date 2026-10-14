@@ -848,6 +848,7 @@ function openPlayer(index, autoplay, startAt, opts) {
   if (index < 0 || index >= queue.length) return;
   opts = opts || {};
   queueIndex = index;
+  shuffleMark(index);
   const video = queue[index];
   if (!opts.retry) {
     if (loadRetry) {
@@ -939,13 +940,38 @@ function prefetchNext() {
 /* The index the next video would come from, or -1 at the end of the list.
    Repeat All wraps, but a queue pushed from the phone never does (WP7).
    pick=true lets shuffle choose; false gives the predictable neighbour. */
+/* WP7: shuffle visits every video in the queue once. When all have played it
+   ends the list like the in-order path does (Finished), unless Repeat all is
+   on and the queue was not pushed from the phone, which never wraps. The
+   shuffled pick is chosen once per (queue, position) so the 'Next: …' line,
+   the menu and the actual advance all name the same video. */
+var shuffleSeen = { q: null, ids: new Set() };
+var shufflePeek = null;
+
+function shuffleMark(index) {
+  if (shuffleSeen.q !== queue) shuffleSeen = { q: queue, ids: new Set() };
+  const v = queue[index];
+  if (v) shuffleSeen.ids.add(v.id);
+}
+
+function shufflePick() {
+  if (shufflePeek && shufflePeek.q === queue && shufflePeek.from === queueIndex) return shufflePeek.n;
+  shuffleMark(queueIndex);
+  let pool = [];
+  queue.forEach((v, i) => { if (i !== queueIndex && !shuffleSeen.ids.has(v.id)) pool.push(i); });
+  const pushed = !!(queue[0] && queue[0]._pushed);
+  if (!pool.length && prefs && prefs.repeat() === 'all' && !pushed) {
+    shuffleSeen.ids = new Set();
+    queue.forEach((v, i) => { if (i !== queueIndex) pool.push(i); });
+  }
+  const n = pool.length ? pool[Math.floor(Math.random() * pool.length)] : -1;
+  shufflePeek = { q: queue, from: queueIndex, n };
+  return n;
+}
+
 function nextIndex(pick) {
   if (!queue.length) return -1;
-  if (pick && prefs && prefs.shuffle() && queue.length > 1) {
-    let n = queueIndex;
-    while (n === queueIndex) n = Math.floor(Math.random() * queue.length);
-    return n;
-  }
+  if (prefs && prefs.shuffle() && queue.length > 1) return shufflePick();
   if (queueIndex + 1 < queue.length) return queueIndex + 1;
   const pushed = !!(queue[0] && queue[0]._pushed);
   if (prefs && prefs.repeat() === 'all' && queue.length > 1 && !pushed) return 0;
@@ -1474,7 +1500,7 @@ function showFinished() {
 function renderPlayerMenu() {
   const n = queue.length > 1 ? nextIndex(false) : -1;
   const nextRow = document.querySelector('#player-menu [data-act="next"]');
-  if (nextRow) nextRow.classList.toggle('pm-off', n < 0 && !(prefs && prefs.shuffle() && queue.length > 1));
+  if (nextRow) nextRow.classList.toggle('pm-off', n < 0);
   setText('#pm-next', n >= 0 ? (n + 1) + ' of ' + queue.length : '');
   setText('#pm-speed', prefs ? prefs.speedLabel() : '1x');
   setText('#pm-sound', sound && !sound.enabled() ? 'Off' : 'On');
