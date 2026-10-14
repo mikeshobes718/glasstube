@@ -307,7 +307,8 @@ button { font-family: inherit; }
   align-self: flex-start;
   min-height: 64px;
   height: 64px;
-  margin: 4px 4px 8px;
+  /* Room for the ring below, so the scroll area never clips it. */
+  margin: 7px 7px 11px;
   padding: 0 32px;
   background: var(--accent);
   color: var(--t1);
@@ -319,10 +320,11 @@ button { font-family: inherit; }
 
 .list-btn.is-action .list-label { color: var(--t1); }
 
-/* Ring sits 4px outside the red pill so it never merges with the fill. */
+/* A 4px black gap between the 3px ring and the red pill (plan: 'Focus ring
+   offset 4px'), so the ring never merges with the fill. */
 .list-btn.is-action::after {
-  inset: -4px;
-  border-radius: 36px;
+  inset: -7px;
+  border-radius: 39px;
 }
 
 .back-row { margin-top: auto; padding-top: 0; }
