@@ -102,6 +102,14 @@ struct RootView: View {
         }
         .onOpenURL { incoming in
             if incoming.scheme == "glasstube", incoming.host == "oauth" { return }
+            // glasstube://pair?code=ABC123 pairs this phone with the glasses
+            // showing that code, same as typing it in From iPhone.
+            if incoming.scheme == "glasstube", incoming.host == "pair" {
+                let code = URLComponents(url: incoming, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first(where: { $0.name == "code" })?.value ?? ""
+                if !code.isEmpty { Task { await store.connect(code) } }
+                return
+            }
             if let raw = watchURL(from: incoming) {
                 tab = .send
                 Task { await store.send(link: raw) }

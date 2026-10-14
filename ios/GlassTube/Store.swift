@@ -115,6 +115,7 @@ final class Store: ObservableObject {
         }
         pairBusy = true
         defer { pairBusy = false }
+        reconnectTask?.cancel()
         do {
             let pair = try await API.touch(want)
             apply(pair)
@@ -136,8 +137,13 @@ final class Store: ObservableObject {
             for attempt in 0..<5 {
                 if Task.isCancelled { return }
                 do {
-                    let pair = try await API.touch(self.key)
-                    await MainActor.run { self.apply(pair) }
+                    // The answer belongs to the key it was asked about. If the
+                    // phone was paired to something else while this was in
+                    // flight (glasstube://pair), applying it would put the old
+                    // pairing back.
+                    let asked = self.key
+                    let pair = try await API.touch(asked)
+                    await MainActor.run { if self.key == asked { self.apply(pair) } }
                     return
                 } catch let e as GlassTubeError {
                     if case .server(let m) = e,

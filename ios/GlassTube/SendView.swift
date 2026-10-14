@@ -8,6 +8,7 @@ struct SendView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             List {
                 if !store.paired {
                     Section {
@@ -54,6 +55,7 @@ struct SendView: View {
 
                 if let outcome = store.outcome {
                     Section { OutcomeBanner(outcome: outcome) }
+                        .id("outcome")
                 }
 
                 if !store.recents.isEmpty {
@@ -103,6 +105,14 @@ struct SendView: View {
             .sheet(isPresented: $showPair) { PairView() }
             .overlay { if store.sending { SendingOverlay() } }
             .animation(.default, value: store.sending)
+            // A send from a row further down the page used to finish with its
+            // result off-screen, so a failure looked like "nothing happened".
+            .onChange(of: store.sending) { _, now in
+                if !now, store.outcome != nil {
+                    withAnimation { proxy.scrollTo("outcome", anchor: .center) }
+                }
+            }
+            }
         }
     }
 
