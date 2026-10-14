@@ -4643,7 +4643,14 @@ function openSettings() {
 }
 
 function openDebug() {
-  navTo({ name: 'debug', render: function () { renderDebug(); show('debug'); } });
+  navTo({ name: 'debug', render: function () {
+    renderDebug();
+    show('debug');
+    // Start at the top (Build first). A hidden scroller keeps its old offset,
+    // and a Back restore puts the saved one back after this (navRestore).
+    const rows = $('#debug-rows');
+    if (rows) { rows.scrollTop = 0; syncFades(); }
+  } });
 }
 
 window.addEventListener('offline', () => setOffline(true));

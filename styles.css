@@ -529,7 +529,8 @@ body.hud-player .errbar { display: none !important; }
 #yt-wrap.audio-only #yt-poster {
   display: block !important;
   left: 24px;
-  top: 376px;
+  /* Below the gate's second line (y 364-392), above the bottom band (480). */
+  top: 390px;
   width: 160px;
   height: 90px;
   border-radius: 12px;
