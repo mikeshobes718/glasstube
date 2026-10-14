@@ -38,13 +38,19 @@ function noteAgent(req, code, out) {
    but it judged that against its own clock, and the glasses' clock is not
    ours: a skewed one made every push look old, acked and silently dropped.
    The server's clock wrote ts, so the server decides. A fresh push goes out
-   without ts, which every HUD build reads as "play it". */
+   without ts, which every HUD build reads as "play it". A stale one keeps ts
+   for builds that still compare clocks, and every push says stale and ageS so
+   a current HUD never has to: it shows a stale push as 'Missed from iPhone'. */
 const PUSH_FRESH_MS = 10 * 60 * 1000;
-function judgeFresh(out) {
+export function judgeFresh(out) {
   const dest = out && out.dest;
-  if (dest && dest.ts && Date.now() - Number(dest.ts) < PUSH_FRESH_MS) {
-    out.dest = Object.assign({}, dest);
-    delete out.dest.ts;
+  const ageMs = dest && dest.ts ? Date.now() - Number(dest.ts) : NaN;
+  if (Number.isFinite(ageMs)) {
+    out.dest = Object.assign({}, dest, {
+      stale: ageMs >= PUSH_FRESH_MS,
+      ageS: Math.max(0, Math.round(ageMs / 1000)),
+    });
+    if (!out.dest.stale) delete out.dest.ts;
   }
   return out;
 }

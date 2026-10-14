@@ -263,9 +263,107 @@ function queriesAdd(q) {
   try { localStorage.setItem(QUERIES_KEY, JSON.stringify(next)); } catch (e) { /* private mode */ }
 }
 
-function pairCodeStored() {
-  try { return localStorage.getItem(PAIR_KEY) || ''; }
+/* WP4: durable pairing. The key is written everywhere: localStorage plus a
+   year-long cookie, and a launch URL may carry it as ?pair=, so a storage
+   wipe on the glasses no longer drops the phone. Read order: URL, then
+   localStorage, then the cookie. Unlinking while the launch URL still carries
+   the old key marks that key ignored, or it would come back on the next
+   launch and quietly move the glasses off the phone's pairing. */
+const PAIR_RE = /^[A-Z0-9]{6}$|^[a-f0-9]{64}$/i;
+const PAIR_COOKIE = 'glasstube_pair';
+const IGNORE_PAIR_KEY = 'glasstube.ignoreUrlPair';
+const IGNORE_PAIR_COOKIE = 'glasstube_ignore_pair';
+const LINKED_KEY = 'glasstube.linked';
+const TOUCH_KEY = 'glasstube.lastTouchAt';
+const TOUCH_EVERY_MS = 6 * 60 * 60 * 1000;
+let pairPaired = false;
+let pairTouchAt = 0;
+
+function lsGet(k) {
+  try { return localStorage.getItem(k) || ''; }
   catch (e) { return ''; }
+}
+
+function pairNorm(v) {
+  const t = String(v || '').trim();
+  if (!PAIR_RE.test(t)) return '';
+  return t.length === 6 ? t.toUpperCase() : t.toLowerCase();
+}
+
+function cookieGet(name) {
+  try {
+    const m = String(document.cookie || '').match(new RegExp('(?:^|;\\s*)' + name + '=([^;]*)'));
+    return m ? decodeURIComponent(m[1]) : '';
+  } catch (e) { return ''; }
+}
+
+function cookieSet(name, value) {
+  try {
+    document.cookie = name + '=' + encodeURIComponent(value || '') +
+      '; Max-Age=' + (value ? 31536000 : 0) + '; Path=/; SameSite=Lax' +
+      (location.protocol === 'https:' ? '; Secure' : '');
+  } catch (e) { /* cookies off */ }
+}
+
+function pairUrlRaw() {
+  try { return pairNorm(new URLSearchParams(location.search).get('pair')); }
+  catch (e) { return ''; }
+}
+
+function pairUrlIgnored() {
+  const raw = pairUrlRaw();
+  return !!raw && raw === pairNorm(lsGet(IGNORE_PAIR_KEY) || cookieGet(IGNORE_PAIR_COOKIE));
+}
+
+/* Every deliberate unlink, and a pairing the server says is gone. */
+function pairIgnoreUrl() {
+  const raw = pairUrlRaw();
+  if (!raw) return;
+  try { localStorage.setItem(IGNORE_PAIR_KEY, raw); } catch (e) { /* optional */ }
+  cookieSet(IGNORE_PAIR_COOKIE, raw);
+}
+
+/* Once at boot: pick the key by the read order, then write it back to every
+   store so they stay in step. */
+function pairBoot() {
+  let code = pairCodeStored();
+  let link = linkStored();
+  const url = pairUrlIgnored() ? '' : pairUrlRaw();
+  if (url.length === 64 && url !== link) { link = url; code = ''; }
+  else if (url.length === 6 && url !== code) { code = url; link = ''; }
+  pairCode = code;
+  pairCodeStore(code);
+  linkStore(link);
+  pairPaired = !!link && lsGet(LINKED_KEY) === '1';
+}
+
+/* The last poll said a phone has claimed this pair. Kept across reloads so
+   the Home chip does not flash 'Not linked' at every launch. */
+function pairPairedSet(v) {
+  if (!!v === pairPaired) return;
+  pairPaired = !!v;
+  try { localStorage.setItem(LINKED_KEY, pairPaired ? '1' : '0'); } catch (e) { /* optional */ }
+}
+
+/* Keepalive only for a pair a phone already claimed, at most every 6h. The
+   old every-8th-poll touch is what marked a fresh, untyped code 'paired'. */
+function pairTouchMaybe() {
+  const last = Math.max(pairTouchAt, Number(lsGet(TOUCH_KEY)) || 0);
+  if (Date.now() - last < TOUCH_EVERY_MS) return;
+  pairTouchAt = Date.now();
+  try { localStorage.setItem(TOUCH_KEY, String(pairTouchAt)); } catch (e) { /* optional */ }
+  fetch('/api/pair', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: pairKey(), touch: true }),
+  }).catch(() => {});
+}
+
+function pairCodeStored() {
+  const c = lsGet(PAIR_KEY);
+  if (c) return c;
+  const k = pairNorm(cookieGet(PAIR_COOKIE));
+  return k.length === 6 ? k : '';
 }
 
 function pairCodeStore(c) {
@@ -273,6 +371,7 @@ function pairCodeStore(c) {
     if (c) localStorage.setItem(PAIR_KEY, c);
     else localStorage.removeItem(PAIR_KEY);
   } catch (e) { /* optional */ }
+  cookieSet(PAIR_COOKIE, pairLink || c);
   pairKeyChanged();
 }
 
@@ -290,8 +389,10 @@ function pairKeyChanged() {
    time either device spoke. Talking to the server with the token is what stops
    the phone asking for a code again every time it reopens. */
 function linkStored() {
-  try { return localStorage.getItem(LINK_KEY) || ''; }
-  catch (e) { return ''; }
+  const t = lsGet(LINK_KEY);
+  if (t) return t;
+  const k = pairNorm(cookieGet(PAIR_COOKIE));
+  return k.length === 64 ? k : '';
 }
 
 function linkStore(t) {
@@ -300,6 +401,7 @@ function linkStore(t) {
     if (pairLink) localStorage.setItem(LINK_KEY, pairLink);
     else localStorage.removeItem(LINK_KEY);
   } catch (e) { /* optional */ }
+  cookieSet(PAIR_COOKIE, pairLink || pairCodeStored());
   pairKeyChanged();
 }
 
@@ -543,10 +645,43 @@ function netText(e) {
   return s;
 }
 
+/* WP4: one failed poll is not 'offline'. Two in a row are, or the OS saying
+   so. In the player the text is a toast, never the full-width bar, and it
+   clears the moment a request gets through, playing or not. pollFails (WP1,
+   declared with the poll loop state) is the one failure counter: it drives
+   both the backoff and this threshold. */
+
+function offlineText() {
+  return navigator.onLine === false ? 'No internet' : 'Can\'t reach GlassTube · retrying';
+}
+
+function isOfflineText(t) {
+  return /No internet|Can't reach GlassTube/i.test(String(t || ''));
+}
+
 function setOffline(on) {
+  const was = netOffline;
   netOffline = !!on;
-  if (on) setStatus('No internet. Retrying...', true);
-  else if (!nowPlaying) setStatus('');
+  if (on) {
+    if (current === 'player') showToast(offlineText(), 'err', 16000);
+    else setStatus(offlineText(), true);
+  } else {
+    const st = $('#status');
+    if (st && isOfflineText(st.textContent)) setStatus('');
+    const t = $('#toast');
+    if (t && isOfflineText(t.textContent)) showToast('');
+  }
+  if (was !== netOffline) updateHomePhoneHint();
+}
+
+function netFail() {
+  pollFails += 1;
+  if (pollFails >= 2 || navigator.onLine === false) setOffline(true);
+}
+
+function netOk() {
+  pollFails = 0;
+  setOffline(false);
 }
 
 function renderSound() {
@@ -716,15 +851,41 @@ function playlistRemember(name, videos) {
   playlistsSave(next);
 }
 
+/* WP4: Home tells the truth about the link: a chip in the header and the
+   From iPhone row's second line. Linked means a link token is held and the
+   last poll said a phone claimed it. */
+function pairLinked() {
+  return !!pairLink && pairPaired;
+}
+
 function updateHomePhoneHint() {
   const el = document.querySelector('[data-menu="phone"] small');
-  if (!el) return;
-  if (pairCode) el.textContent = 'Code ' + pairCode + ' · listening';
-  else el.textContent = 'Paste a YouTube link on your iPhone';
+  const chip = $('#link-chip');
+  const linked = pairLinked();
+  if (el) {
+    let t = 'Getting a code…';
+    if (netOffline) t = offlineText();
+    else if (linked && lastPushInfo) t = 'iPhone linked · last video ' + agoText(Date.now() - lastPushInfo.at);
+    else if (linked) t = 'iPhone linked';
+    else if (pairCode) t = 'Code ' + pairCode + ' · waiting for iPhone';
+    if (el.textContent !== t) el.textContent = t;
+  }
+  if (!chip) return;
+  const state = netOffline ? 'err' : (linked ? 'on' : 'off');
+  if (chip.dataset.state === state) return;
+  chip.dataset.state = state;
+  chip.className = 'link-chip link-' + state;
+  const dot = document.createElement('span');
+  dot.className = 'chip-dot';
+  dot.textContent = { on: '●', off: '○', err: '!' }[state];
+  chip.textContent = '';
+  chip.appendChild(dot);
+  chip.appendChild(document.createTextNode({ on: ' Linked', off: ' Not linked', err: ' Offline' }[state]));
 }
 
 function renderHome() {
   updateHomePhoneHint();
+  renderMissed();
   renderContinue();
   const lib = document.querySelector('[data-menu="library"]');
   if (lib) lib.classList.toggle('hidden', !ytSession);
@@ -1095,7 +1256,7 @@ function setLoading(on, title, text) {
   el.classList.toggle('hidden', !on);
   if (on) setPlayGate(false);
   if (name) name.textContent = title || (nowPlaying && nowPlaying.title) || 'YouTube video';
-  if (msg) msg.textContent = netOffline ? 'No internet. Retrying...' : (text || 'Loading...');
+  if (msg) msg.textContent = netOffline ? offlineText() : pushGateText(text || 'Loading...');
 }
 
 function setPlayGate(on, title, text) {
@@ -1211,6 +1372,7 @@ function blockedText(code, err) {
 }
 
 function skipUnplayable(err, code) {
+  pushFailed();
   playFailNote(err, code);
   if (nowPlaying && nowPlaying.id) skipIds[nowPlaying.id] = true;
   for (let i = 1; i <= queue.length; i++) {
@@ -1374,6 +1536,244 @@ function playPrev() {
   openPlayer(prev, true);
 }
 
+/* WP4: what happens to each push the HUD receives.
+
+   - A stale one (the server says so, or, with no stale field, its ts is older
+     than 10 minutes by this clock) waits on Home as 'Missed from iPhone'. The
+     last 3 are kept for 24h. The phone's file URL is never persisted; the live
+     push stays in memory for this page's life.
+   - One that lands while the page is hidden is held, and plays on the next
+     visible event or the first key press.
+   - The rest play at once, with a receipt toast that route retries cannot
+     clear. lastPushInfo records what came of the latest one. */
+const MISSED_KEY = 'glasstube.missed';
+const MISSED_MAX = 3;
+const MISSED_TTL_MS = 24 * 60 * 60 * 1000;
+const LAST_PUSH_KEY = 'glasstube.lastPush';
+const PUSH_START_TEXT = 'From your iPhone · starting…';
+const IDLE_HOME_MS = 5000;
+let missedMem = {};
+let pendingPush = null;
+let pushStartId = '';
+let pushStartAt = 0;
+let lastPushInfo = lastPushLoad();
+
+function agoText(ms) {
+  const m = Math.floor(Math.max(0, ms) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + ' min ago';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + ' h ago';
+  const d = Math.floor(h / 24);
+  return d === 1 ? 'yesterday' : d + ' days ago';
+}
+
+function pushVideos(dest) {
+  return (dest && dest.videos && dest.videos.length) ? dest.videos : [dest || {}];
+}
+
+function pushTitle(dest) {
+  const vids = pushVideos(dest);
+  const first = (vids[0] && vids[0].title) || (dest && dest.title) || 'YouTube video';
+  if (vids.length < 2) return first;
+  const name = dest.playlist && dest.playlist !== 'From iPhone' ? dest.playlist : first;
+  return name + ' · ' + vids.length + ' videos';
+}
+
+/* When the phone sent it, on this clock. The server's ageS beats its ts. */
+function pushSentAt(dest, gotAt) {
+  const age = Number(dest && dest.ageS);
+  if (dest && dest.ageS != null && Number.isFinite(age)) return gotAt - age * 1000;
+  const ts = Number(dest && dest.ts);
+  return ts > 0 ? ts : gotAt;
+}
+
+function pushIsStale(dest) {
+  if (dest && dest.stale != null) return dest.stale === true;
+  return !!(dest && dest.ts) && Date.now() - Number(dest.ts) > PUSH_FRESH_MS;
+}
+
+function lastPushLoad() {
+  try {
+    const v = JSON.parse(localStorage.getItem(LAST_PUSH_KEY) || 'null');
+    return v && v.at ? v : null;
+  } catch (e) { return null; }
+}
+
+function lastPushSave(info) {
+  lastPushInfo = info;
+  try { localStorage.setItem(LAST_PUSH_KEY, JSON.stringify(info)); } catch (e) { /* private mode */ }
+  if (current === 'phone') renderPhone();
+}
+
+function lastPushText() {
+  const p = lastPushInfo;
+  if (!p) return '';
+  return 'Last from iPhone: ' + p.title + ' · ' + agoText(Date.now() - p.at) +
+    (p.outcome ? ' · ' + p.outcome : '');
+}
+
+function lastPushMine() {
+  return !!(lastPushInfo && nowPlaying && (lastPushInfo.ids || []).indexOf(nowPlaying.id) >= 0);
+}
+
+function lastPushOutcome(outcome) {
+  if (!lastPushInfo || lastPushInfo.outcome === outcome) return;
+  lastPushSave(Object.assign({}, lastPushInfo, { outcome: outcome }));
+}
+
+/* From updateChrome: the video on screen is really playing. */
+function pushPlayed() {
+  pushStartId = '';
+  if (lastPushMine() && lastPushInfo.outcome !== 'played' && lastPushInfo.outcome !== 'missed') {
+    lastPushOutcome('played');
+  }
+}
+
+/* From skipUnplayable: no route could play it. */
+function pushFailed() {
+  if (lastPushMine() && !lastPushInfo.outcome) lastPushOutcome('couldn\'t play');
+}
+
+/* setLoading keeps the receipt on the load gate while a push starts. */
+function pushGateText(text) {
+  if (text === 'Loading...' && pushStartId && nowPlaying && nowPlaying.id === pushStartId &&
+      Date.now() - pushStartAt < 60000) return PUSH_START_TEXT;
+  return text;
+}
+
+function missedLoad() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(MISSED_KEY) || '[]');
+    const since = Date.now() - MISSED_TTL_MS;
+    return Array.isArray(raw)
+      ? raw.filter(function (m) { return m && m.id && m.key && Number(m.at) > since; })
+      : [];
+  } catch (e) { return []; }
+}
+
+function missedSave(list) {
+  try { localStorage.setItem(MISSED_KEY, JSON.stringify(list.slice(0, MISSED_MAX))); }
+  catch (e) { /* private mode */ }
+}
+
+function missedAdd(dest, sentAt) {
+  const vids = pushVideos(dest).filter(function (v) { return v && v.id; });
+  if (!vids.length) return;
+  const at = sentAt || pushSentAt(dest, Date.now());
+  const key = vids[0].id + '@' + Math.round(at);
+  missedMem[key] = dest;
+  const entry = {
+    key: key, at: at, id: vids[0].id, title: vids[0].title || dest.title || '',
+    channel: vids[0].channel || '', thumb: vids[0].thumb || '',
+    playlist: dest.playlist || '', app: dest.app || '',
+    videos: vids.slice(0, 50).map(function (v) {
+      return { id: v.id, title: v.title || '', channel: v.channel || '', thumb: v.thumb || '' };
+    }),
+  };
+  missedSave([entry].concat(missedLoad().filter(function (m) { return m.key !== key; })));
+}
+
+function missedTake(key) {
+  missedSave(missedLoad().filter(function (m) { return m.key !== key; }));
+}
+
+/* The top Home row. Only the newest missed push shows; the next one takes
+   its place once it is played. */
+function renderMissed() {
+  const btn = $('#btn-missed');
+  if (!btn) return;
+  const m = missedLoad()[0];
+  const was = !btn.classList.contains('hidden');
+  btn.classList.toggle('hidden', !m);
+  if (!m) {
+    if (was && document.activeElement === btn && current === 'home') focusFirst();
+    return;
+  }
+  const title = pushTitle(m);
+  const sub = 'Sent ' + agoText(Date.now() - m.at) + ' · pinch to play';
+  if ($('#missed-title').textContent !== title) $('#missed-title').textContent = title;
+  if ($('#missed-sub').textContent !== sub) $('#missed-sub').textContent = sub;
+}
+
+function openMissed() {
+  const m = missedLoad()[0];
+  if (!m) { renderHome(); return; }
+  const dest = missedMem[m.key] || m;
+  missedTake(m.key);
+  delete missedMem[m.key];
+  playPush(Object.assign({}, dest), m.at, true);
+}
+
+function pushMissed(dest, sentAt) {
+  missedAdd(dest, sentAt);
+  lastPushSave({ title: pushTitle(dest), at: sentAt, outcome: 'missed',
+    ids: pushVideos(dest).slice(0, 50).map(function (v) { return v && v.id; }) });
+  renderHome();
+  if (current === 'home' && Date.now() - lastKeyAt > IDLE_HOME_MS) {
+    const btn = $('#btn-missed');
+    if (btn && !btn.classList.contains('hidden')) {
+      btn.focus();
+      reveal(btn);
+    }
+  }
+}
+
+function playPush(dest, sentAt, quiet) {
+  applyPush(dest);
+  lastPushSave({ title: pushTitle(dest), at: sentAt || Date.now(), outcome: '',
+    ids: queue.slice(0, 50).map(function (v) { return v.id; }) });
+  pushStartId = (nowPlaying && nowPlaying.id) || '';
+  pushStartAt = Date.now();
+  if (!quiet) showToast('From your iPhone · ' + pushTitle(dest), 'info', 3000);
+  const msg = $('#load-gate-msg');
+  if (msg && current === 'player' && !netOffline) msg.textContent = PUSH_START_TEXT;
+}
+
+/* pollPair hands over each new destSeq here, after the ack. */
+function handlePush(dest, seq, special) {
+  const gotAt = Date.now();
+  const first = pushVideos(dest)[0] || {};
+  const ageS = dest.ageS != null ? Number(dest.ageS)
+    : (dest.ts ? Math.round((gotAt - Number(dest.ts)) / 1000) : null);
+  const stale = !special && pushIsStale(dest);
+  const held = !special && !stale && !!document.hidden;
+  hudNote('push', { seq: seq, stale: stale, held: held, ageS: ageS,
+    hasU: !!(dest.u || first.u) });
+  if (special) {
+    applyPush(dest);
+    return;
+  }
+  const sentAt = pushSentAt(dest, gotAt);
+  if (stale) {
+    pushMissed(dest, sentAt);
+    if (typeof deliveryReport === 'function') deliveryReport('missed');
+    return;
+  }
+  if (held) {
+    if (pendingPush) pushMissed(pendingPush.dest, pendingPush.sentAt);
+    pendingPush = { dest: dest, sentAt: sentAt };
+    if (typeof deliveryReport === 'function') deliveryReport('hidden');
+    return;
+  }
+  playPush(dest, sentAt);
+}
+
+/* A held push plays when the wearer can see it. If it went stale while
+   held, it waits on Home instead of starting out of nowhere. */
+function releasePendingPush() {
+  if (!pendingPush) return false;
+  const p = pendingPush;
+  pendingPush = null;
+  if (Date.now() - p.sentAt > PUSH_FRESH_MS) {
+    pushMissed(p.dest, p.sentAt);
+    if (typeof deliveryReport === 'function') deliveryReport('missed');
+  } else {
+    playPush(p.dest, p.sentAt);
+  }
+  return true;
+}
+
 /* A push from the phone. It can carry videos, a channel list, a channel to
    open, or the phone's Google session so the glasses can search.
 
@@ -1388,18 +1788,19 @@ function applyPush(dest) {
   if (dest.kind === 'session') {
     sessionStore(dest.session || '');
     library = null;
-    setStatus(dest.session ? 'Signed in from your phone.' : 'Signed out.', false);
+    showToast(dest.session ? 'Signed in from your iPhone' : 'Signed out from your iPhone', 'ok');
     renderHome();
     return;
   }
   if (dest.kind === 'channels') {
     channelsSave(dest.channels || []);
     if (listKind === 'channels' && current === 'list') navRefresh();
-    if (current !== 'player') setStatus('Channels updated from your phone.');
+    showToast('Channels updated from your iPhone', 'ok');
     return;
   }
   if (dest.kind === 'channel' && dest.id) {
     loadChannel({ id: dest.id, name: dest.name || 'Channel' });
+    showToast('From your iPhone · ' + (dest.name || 'Channel'), 'info', 3000);
     return;
   }
   if (dest.app) phoneApp = String(dest.app);
@@ -1430,9 +1831,6 @@ function applyPush(dest) {
     origin: String(window.location.origin || ''),
   });
   navPlayer(0, resumeAt(queue[0] && queue[0].id));
-  setStatus(list.length > 1
-    ? 'Playing ' + name + ' · ' + list.length + ' videos.'
-    : 'Playing from your phone.');
 }
 
 /* A push replaces what is playing rather than stacking on it: the player on
@@ -1509,6 +1907,7 @@ function updateChrome() {
     }
     rememberRoute(snap.route);
     progressSave();
+    pushPlayed();
   } else if (snap.error) {
     needGesture = false;
     const id = nowPlaying && nowPlaying.id;
@@ -1957,13 +2356,31 @@ function openPhone() {
   pairCode = pairCodeStored();
   pairLink = linkStored();
   if (pairKey()) {
-    $('#pair-code').textContent = pairCode || '······';
-    $('#pair-help').textContent = pairLink
-      ? 'Your iPhone stays linked on its own. This code is only for linking a new phone.'
-      : 'Type this code in the GlassTube iPhone app.';
+    renderPhone();
     startPairPoll();
+    // No default focus here (WP3 focusDefault): a stray pinch on arrival
+    // never lands on 'Link a different phone'.
   } else {
     newPairCode();
+  }
+}
+
+/* WP4: linked, the screen says so and keeps the code small; not linked, it
+   shows the big code and the three steps. */
+function renderPhone() {
+  const linked = pairLinked();
+  $('#pair-linked').classList.toggle('hidden', !linked);
+  $('#pair-code').classList.toggle('hidden', linked);
+  $('#pair-steps').classList.toggle('hidden', linked);
+  if (linked) {
+    $('#pair-last').textContent = lastPushInfo
+      ? lastPushText()
+      : 'Send a video from the iPhone app. It plays here on any screen.';
+    $('#pair-linked-code').textContent = pairCode ? 'Code ' + pairCode : '';
+    $('#pair-help').textContent = '';
+  } else {
+    $('#pair-code').textContent = pairCode || (pairKey() ? '······' : '------');
+    $('#pair-help').textContent = pairKey() ? 'Waiting for your iPhone…' : 'Getting a code…';
   }
 }
 
@@ -1972,36 +2389,38 @@ function newPairCode() {
     clearTimeout(pairMintTimer);
     pairMintTimer = 0;
   }
+  pairPairedSet(false);
+  if (current === 'phone') renderPhone();
   $('#pair-code').textContent = '------';
-  $('#pair-help').textContent = netOffline ? 'No internet. Retrying...' : 'Getting a code...';
+  $('#pair-help').textContent = netOffline ? offlineText() : 'Getting a code…';
   fetch('/api/pair', { method: 'POST' })
     .then(r => r.json())
     .then(d => {
       if (!d.ok || !d.code) {
         pairState = d.error || 'pair failed';
         if (isNetErr(d.error)) {
-          setOffline(true);
-          $('#pair-help').textContent = 'No internet. Retrying...';
+          netFail();
+          $('#pair-help').textContent = offlineText();
           pairMintTimer = setTimeout(newPairCode, RETRY_MS);
           return;
         }
         $('#pair-help').textContent = d.error || 'Could not get a code. Check Diagnostics.';
         return;
       }
-      setOffline(false);
+      netOk();
       pairCode = d.code;
       pairCodeStore(pairCode);
       linkStore(d.token || '');
       pairState = 'code ' + pairCode;
       $('#pair-code').textContent = pairCode;
-      $('#pair-help').textContent = 'Type this code in the GlassTube iPhone app.';
+      $('#pair-help').textContent = 'Waiting for your iPhone…';
       updateHomePhoneHint();
       startPairPoll();
     })
     .catch(e => {
       pairState = netText(e).slice(0, 40);
-      setOffline(true);
-      $('#pair-help').textContent = 'No internet. Retrying...';
+      netFail();
+      $('#pair-help').textContent = offlineText();
       pairMintTimer = setTimeout(newPairCode, RETRY_MS);
     });
 }
@@ -2139,12 +2558,14 @@ function pollPair() {
     })
     .then(d => {
       answered = true;
-      pollFails = 0;
       // The key changed while this was out (unlink, new code): not ours.
       if (key !== pairKey()) return;
       d = d || {};
       if (!d.ok) {
         const dead = d.gone === true || /expir|not active|not found|unknown/i.test(d.error || '');
+        // A server that answers 'gone' is reachable, so not 'offline'.
+        if (dead) netOk();
+        else netFail();
         // One dead answer is not proof: a server or database blip says the
         // same. Wipe the link only after GONE_STRIKES answers over GONE_SPAN_MS.
         if (dead) {
@@ -2166,6 +2587,8 @@ function pollPair() {
         goneStrikes = 0;
         goneFirstAt = 0;
         stopPairPoll();
+        pairIgnoreUrl();
+        pairPairedSet(false);
         pairCodeStore('');
         linkStore('');
         pairCode = '';
@@ -2177,28 +2600,18 @@ function pollPair() {
       goneFirstAt = 0;
       lastPoll = { at: Date.now(), ok: true, text: d.paired ? 'ok · paired' : 'ok · waiting' };
       noteServerBuild(d.build);
-      setOffline(false);
+      netOk();
       if (d.token && d.token !== pairLink) linkStore(d.token);
       if (d.code && d.code !== pairCode) {
         pairCode = d.code;
         pairCodeStore(pairCode);
-        if (current === 'phone') $('#pair-code').textContent = pairCode;
       }
+      pairPairedSet(d.paired === true);
       pairState = (d.paired ? 'paired' : 'waiting') + ' · ' + pairCode;
       renderHome();
       pairPolls += 1;
-      if (pairPolls % 8 === 0) {
-        fetch('/api/pair', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: pairKey(), touch: true }),
-        }).catch(() => {});
-      }
-      if (current === 'phone') {
-        $('#pair-help').textContent = d.paired
-          ? 'Phone connected. Send a video from the iPhone app. It starts here on any screen.'
-          : 'Type this code in the GlassTube iPhone app.';
-      }
+      if (d.paired === true) pairTouchMaybe();
+      if (current === 'phone') renderPhone();
       const dest = d.dest;
       const playable = dest && (dest.id || (dest.videos && dest.videos[0]));
       const special = dest && (dest.kind === 'channels' || dest.kind === 'channel' ||
@@ -2210,25 +2623,18 @@ function pollPair() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code: pairKey(), ack: d.destSeq }),
         }).catch(() => {});
-        // A push older than a few minutes is a leftover from before this page
-        // loaded. Ack it but never auto-play it, so a forgotten tab stays silent.
-        const stale = playable && !special && dest.ts &&
-          (Date.now() - Number(dest.ts) > PUSH_FRESH_MS);
-        hudNote('push', { seq: d.destSeq, stale: !!stale,
-          ageS: dest.ts ? Math.round((Date.now() - Number(dest.ts)) / 1000) : null,
-          hasU: !!(dest.u || (dest.videos && dest.videos[0] && dest.videos[0].u)) });
-        if (!stale) applyPush(dest);
+        // Stale, hidden and fresh pushes each go their own way: handlePush.
+        handlePush(dest, d.destSeq, !!special);
       }
     })
     .catch(e => {
       // A bug while handling a good answer is not the network going away.
       if (answered) { report('JS error: poll · ' + String((e && e.message) || e).slice(0, 120)); return; }
       if (key !== pairKey()) return;
-      pollFails += 1;
       const timedOut = e && e.name === 'AbortError';
       pairState = (timedOut ? 'no answer in ' + (POLL_TIMEOUT_MS / 1000) + 's' : netText(e)).slice(0, 48);
       lastPoll = { at: Date.now(), ok: false, text: pairState };
-      setOffline(true);
+      netFail();
     })
     .then(function () {
       clearTimeout(timeout);
@@ -2283,8 +2689,8 @@ function searchTextTyped() {
 
 function pushIsFresh() {
   if (lastPushAt && Date.now() - lastPushAt < UPDATE_PUSH_QUIET_MS) return true;
-  // A push WP4 holds while hidden plays before any reload.
-  return typeof pendingPush !== 'undefined' && !!pendingPush;
+  // A push held while hidden (WP4) plays before any reload.
+  return !!pendingPush;
 }
 
 /* Idle path: after each poll and every UPDATE_CHECK_MS. */
@@ -2370,6 +2776,8 @@ function debugLines() {
   out.push(['Online', navigator.onLine ? 'yes' : 'no', !!navigator.onLine]);
   out.push(['Phone pairing', pairState, pairState.indexOf('paired') === 0 ? true : undefined]);
   out.push(['Pair link', pairLink ? 'durable · survives restarts' : 'code only', !!pairLink]);
+  if (pairUrlIgnored()) out.push(['Launcher link', 'still has the old code', false]);
+  out.push(['Last from iPhone', lastPushInfo ? lastPushText().replace('Last from iPhone: ', '') : 'nothing yet']);
   out.push(['iPhone app', phoneApp || 'has not pushed yet',
     phoneApp ? !phoneOutOfDate() : undefined]);
   out.push(['Google session', ytSession ? 'on glasses' : 'none', !!ytSession]);
@@ -2599,7 +3007,7 @@ document.addEventListener('keydown', function (e) {
   lastActiveAt = lastKeyAt;
   pollSoonerIfIdle();
   const r = resolveKey(e);
-  if (!r) { inputStats.unknown++; return; }
+  if (!r && !pendingPush) { inputStats.unknown++; return; }
   e.preventDefault();
   const now = Date.now();
   // Any resolved gesture is a user activation: let WP5's player unlock audio
@@ -2607,6 +3015,10 @@ document.addEventListener('keydown', function (e) {
   if (typeof Player !== 'undefined' && typeof Player.unlock === 'function') {
     try { Player.unlock(); } catch (x) { /* unlock is best effort */ }
   }
+  // WP4: a push held while hidden plays on the first key when the WebView
+  // never reports visible. That key is consumed, so it is not also read as
+  // a command on the screen underneath.
+  if (pendingPush) { releasePendingPush(); return; }
   if (inputTest && current === 'debug') return;
   const name = r.name || ('char:' + r.char);
   if (r.name === 'enter' && e.repeat) { inputStats.repeat++; return; }
@@ -2777,6 +3189,7 @@ document.querySelectorAll('#screen-home [data-menu]').forEach(btn => {
     if (menu === 'playlists') openPlaylists();
     if (menu === 'phone') openPhone();
     if (menu === 'continue') openContinue();
+    if (menu === 'missed') openMissed();
     if (menu === 'search') openSearch();
     if (menu === 'library') openLibrary();
     if (menu === 'settings') openSettings();
@@ -2803,6 +3216,9 @@ window.addEventListener('online', () => {
    poll now, and if a new build is waiting, load it before any input. */
 function onResume() {
   lastActiveAt = Date.now();
+  // WP4: a push held while hidden plays now that the wearer can see it. It
+  // counts as a fresh push, so resumeUpdate() will not reload over it.
+  releasePendingPush();
   if (resumeUpdate()) return;
   pollNow();
 }
@@ -2839,6 +3255,8 @@ $('#btn-pair-new').addEventListener('click', () => {
   disarmUnlink();
   hudNote('unlink');
   stopPairPoll();
+  pairIgnoreUrl();
+  pairPairedSet(false);
   pairCode = '';
   pairLastSeq = -1;
   pairCodeStore('');
@@ -2921,6 +3339,7 @@ function ensureListening() {
 try { history.replaceState({ gt: 1, d: 0 }, ''); } catch (e) { /* no history API */ }
 sessionStore(sessionLoad());
 renderSettings();
+pairBoot();
 renderHome();
 if (prefs && prefs.sleep()) armSleep();
 ensureListening();
