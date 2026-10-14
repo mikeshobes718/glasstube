@@ -207,6 +207,7 @@ Web icons went to `?v=4` so the Meta drawer refetches.
 2026-09-14 Mac: iPhone app rewritten in SwiftUI (2.0/28), new icon on both iOS and the Meta drawer, feed caching for YouTube's bursty RSS.
 2026-09-14 Mac: Liquid Glass redesign, light/dark/system with per-scheme accents, real Settings tab, iOS 2.1 (29), target raised to iOS 26.
 2026-09-14 Mac: icon redone in YouTube red across iOS and the web set, app accent defaults to match, iOS 2.1 (30).
+2026-10-14 cloud: HUD v2 (WP1-WP8 plus 9 review rounds) on branch hud-v2; deploy, Restart, iOS build and WP6 SQL left for the Mac. Details under "HUD v2 built".
 
 ### Share from YouTube, 2026-09-24
 
@@ -242,3 +243,39 @@ Rules that bit us:
   `ios/install.sh`.
 - Uncommitted iOS work (Berth account sync: Berth.swift, SyncAccountView.swift,
   Store.swift...) lives only on the Mac and belongs to another chat.
+
+### HUD v2 built, 2026-10-14 (from the cloud session)
+
+Branch `hud-v2`, PR to main. All eight work packages from
+`docs/hud-plan/PLAN.md` are in, merged in plan order, then put through nine
+rounds of review (visuals on additive screenshots, Neural Band navigation,
+player and push, code regressions, performance against Meta's budgets). Each
+finding was reproduced by two independent skeptics before it was fixed. The
+last rounds: performance clean for four rounds, player and regressions clean
+for three. Before/after additive screenshots are in `docs/hud-plan/shots/`.
+
+Not done from the cloud, needs the Mac:
+- **Deploy.** The cloud environment blocks glasstube.vercel.app, youtube.com
+  and vercel.com, and has no Vercel login. Run `npm run deploy` (it stamps the
+  build, then `vercel --prod`) from a clean checkout of `hud-v2`. Then
+  `node scripts/selftest.mjs`; it has not been run against production with
+  this code. `api/_rpc.js` is byte-identical to main.
+- **One Restart on the glasses after the deploy.** The page in memory has no
+  updater. Middle-finger tap on GlassTube's Home, then Restart. After that the
+  build chip at the top right shows the new hash for 3 s, and later deploys
+  reload by themselves after about 20 s idle on Home.
+- **iOS** (not compiled here): `ios/GlassTube/WebScreen.swift` gives the push
+  request its own 30 s session (semaphore 32 s), because `/api/push` now waits
+  up to 9.5 s for the glasses to confirm. Build with `ios/install.sh`. Once that
+  build is out, `BUDGET_MS` in `api/push.js` can go from 9500 to about 13000.
+- **WP6 migration** `scripts/sql/2026-10-delivery.sql` is NOT run. Read its
+  header: pick the backend `GLASSTUBE_SUPABASE_URL` serves (Supabase or Berth),
+  check the ASSUMED lines against `pg_get_functiondef`, deploy code first, then
+  run it. Until then the server falls back to today's behaviour (the phone gets
+  today's immediate "Playing on your glasses"); `node scripts/test-delivery.mjs`
+  covers both states (50/50 pass).
+
+Testing without the network: `scripts/hudshot.mjs` now serves fixtures when
+production is unreachable, fakes the phone's file with local VP9 clips
+(`sh scripts/mkmedia.sh`, then `--media id=v169.mp4`), and takes
+`--autoplay-policy` and `--push2-after`.
