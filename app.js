@@ -631,7 +631,21 @@ function showToast(text, kind, ms) {
   const k = (kind === 'ok' || kind === 'err') ? kind : 'info';
   el.textContent = String(text);
   el.className = 'toast toast-' + k;
+  toastRoom(el);
   toastTimer = setTimeout(hideToast, ms > 0 ? ms : 4000);
+}
+
+/* Home has no footer, so its last row can sit in the toast lane. While a
+   toast is up, Home's scroll body ends 4px above the toast's real top (one or
+   two lines) and a focused row it would cover is walked back above it. */
+function toastRoom(el) {
+  const up = !!el && !el.classList.contains('hidden');
+  document.body.classList.toggle('toast-up', up);
+  if (!up) return;
+  document.body.style.setProperty('--toast-room', (52 + el.offsetHeight + 4) + 'px');
+  const f = document.activeElement;
+  if (current !== 'home' || !f || !f.closest || !f.closest('#screen-home .screen-body')) return;
+  if (f.getBoundingClientRect().bottom + 4 > el.getBoundingClientRect().top) reveal(f);
 }
 
 function hideToast(now) {
@@ -643,6 +657,7 @@ function hideToast(now) {
   const done = function () {
     el.className = 'toast hidden';
     el.textContent = '';
+    toastRoom(null);
   };
   if (now === true || el.classList.contains('hidden')) { done(); return; }
   el.classList.add('toast-out');
@@ -3737,7 +3752,7 @@ function debugLines() {
   out.push(['Server build', serverBuild ? 'v' + serverBuild : 'not seen yet',
     serverBuild ? serverBuild === window.GLASSTUBE_BUILD : undefined]);
   out.push(['Update', updateLine()]);
-  out.push(['Old version?', 'Middle-finger tap on the home screen, then Restart.']);
+  out.push(['Old version?', 'Middle-finger tap on Home, then Restart.']);
   out.push(['Last poll', lastPoll.at
     ? Math.round((Date.now() - lastPoll.at) / 1000) + 's ago · ' + lastPoll.text
     : lastPoll.text, lastPoll.at ? lastPoll.ok : undefined]);
@@ -3797,7 +3812,10 @@ function renderDebug() {
     if (row[2] === false) d.className = 'debug-bad';
     // Never colour alone: a glyph says it too.
     const mark = row[2] === true ? '✓ ' : (row[2] === false ? '✗ ' : '');
-    d.textContent = mark + row[0] + (/\?$/.test(row[0]) ? ' ' : ': ') + row[1];
+    const ask = /\?$/.test(row[0]);
+    // A question row is an instruction: it wraps rather than lose its end.
+    if (ask) d.classList.add('debug-wrap');
+    d.textContent = mark + row[0] + (ask ? ' ' : ': ') + row[1];
     rows.appendChild(d);
   });
   const errs = window.glasstubeErrors || [];
