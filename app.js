@@ -2911,6 +2911,11 @@ function renderChannels(page) {
     });
   }
   renderList('Channels', items, 'Add channels on your iPhone. They show up here.', 'channels');
+  // The counter reads the row's place in the whole channel list, not the page.
+  const box = $('#list-items');
+  box.dataset.countBase = start;
+  box.dataset.countTotal = all.length;
+  listCount();
 }
 
 /* The picked row spins while the feed loads; the video list opens only if
