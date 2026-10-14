@@ -19,6 +19,7 @@ const MAX_PLAYLIST = 20;
 const WAIT_MS = 12000;
 const BUDGET_MS = 9500;
 const POLL_MS = 400;
+const CONSUMED_MS = 700;
 
 const sleep = ms => new Promise(r => setTimeout(r, Math.max(0, ms)));
 
@@ -46,7 +47,8 @@ async function confirmDelivery(code, out, before, t0) {
     // The glasses run a build from before delivery reports: nothing to wait for.
     return { delivery: info('sent') };
   }
-  const deadline = Math.min(Date.now() + WAIT_MS, t0 + BUDGET_MS);
+  const end = Math.min(Date.now() + WAIT_MS, t0 + BUDGET_MS);
+  const deadline = end - CONSUMED_MS;
   let seq = firstNum(out && out.destSeq, out && out.dest_seq, out && out.seq);
   let got = false;
   while (Date.now() < deadline) {
@@ -62,8 +64,23 @@ async function confirmDelivery(code, out, before, t0) {
     }
     await sleep(Math.min(POLL_MS, deadline - Date.now()));
   }
+  // No report, yet the push was taken off the row: the glasses (or a HUD on a
+  // path that does not report) picked it up, so the delivery data is behind.
+  // Answer what the legacy server did, not "Not picked up yet".
+  if (!got && seq !== null && await consumed(code, seq, CONSUMED_MS)) {
+    return { delivery: info('unknown') };
+  }
   const state = got ? 'got' : 'none';
   return Object.assign({}, deliveryVerdict(state), { delivery: info(state) });
+}
+
+/* Has push `seq` been acked on the row itself (legacy ack)? false when unsure. */
+async function consumed(code, seq, ms) {
+  let timer = null;
+  const late = new Promise(resolve => { timer = setTimeout(() => resolve(null), ms); });
+  const p = await Promise.race([rpc('glasstube_poll', { p_code: code }).catch(() => null), late]);
+  clearTimeout(timer);
+  return !!(p && p.ok && !p.dest && firstNum(p.destSeq) !== null && firstNum(p.destSeq) >= seq);
 }
 
 function isGoogleFile(u) {

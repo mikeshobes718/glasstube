@@ -58,15 +58,20 @@ function markMissing(why) {
 
 /* A failure that is not obviously "function missing" (a gateway that hides
    the reason, say) only counts once it repeats while the legacy path keeps
-   working, so a single blip never switches delivery off. */
-function noteFailure(name, e) {
+   working, so a single blip never switches delivery off. A backend outage
+   fails the legacy call too, and then it is not a strike at all: switching to
+   legacy would leave /api/push (another instance, still trusting the delivery
+   row) telling the phone the glasses are away while they poll. */
+function isMissing(name, e) {
   const msg = errText(e);
-  if (MISSING_RE.test(msg)) {
-    markMissing(name + ': ' + msg);
-    return;
-  }
+  if (!MISSING_RE.test(msg)) return false;
+  markMissing(name + ': ' + msg);
+  return true;
+}
+
+function strike(name, e) {
   strikes += 1;
-  if (strikes >= STRIKES) markMissing(name + ' failed ' + STRIKES + 'x: ' + msg);
+  if (strikes >= STRIKES) markMissing(name + ' failed ' + STRIKES + 'x while legacy worked: ' + errText(e));
 }
 
 function noteSuccess() {
@@ -91,7 +96,11 @@ export async function rpcOrLegacy(name, args, legacy) {
       noteSuccess();
       return out;
     } catch (e) {
-      noteFailure(name, e);
+      if (!isMissing(name, e)) {
+        const out = await legacy();
+        strike(name, e);
+        return out;
+      }
     }
   }
   return legacy();
@@ -106,8 +115,9 @@ export async function rpcIfReady(name, args, timeoutMs) {
     noteSuccess();
     return out;
   } catch (e) {
-    if (/timed out/.test(errText(e))) return null;
-    noteFailure(name, e);
+    // No legacy twin to prove the backend is up, so only a missing function
+    // counts here; anything else is just "unknown" for this request.
+    isMissing(name, e);
     return null;
   }
 }

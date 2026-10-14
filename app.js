@@ -2104,6 +2104,7 @@ function applyPush(dest) {
   // leaving a playing video saves its progress against its own queue.
   navPushList(name, ordered);
   queue = ordered.map(v => Object.assign({}, v, { _listTitle: name, _pushed: true }));
+  if (deliveryPush && !deliveryPush.done && !deliveryPush.ids) deliveryPush.ids = queue.map(v => v.id);
   playlistRemember(name, list);
   diagSend('push', {
     id: (queue[0] && queue[0].id) || '',
@@ -3546,13 +3547,16 @@ let deliveryPush = null;
 let deliveryChain = Promise.resolve();
 
 function deliveryTrack(seq) {
-  deliveryPush = { seq: seq, id: '', sent: {}, done: false };
+  deliveryPush = { seq: seq, id: '', ids: null, sent: {}, done: false };
 }
 
 /* Which video of the tracked push is on screen: the first one opened after it
-   arrived, or the next one a queue skips to before anything played. */
+   arrived, or the next one a queue skips to before anything played. Only the
+   push's own videos (applyPush lists them) count: a Search or Recents video
+   opened after leaving it is not the phone's push. */
 function deliveryVideo(id) {
   if (!deliveryPush || deliveryPush.done || !id) return;
+  if (!deliveryPush.ids || deliveryPush.ids.indexOf(id) < 0) return;
   if (!deliveryPush.id || !deliveryPush.sent.playing) deliveryPush.id = id;
 }
 
@@ -3571,12 +3575,26 @@ function deliveryReport(state, detail) {
     detail: detail ? String(detail).slice(0, 300) : '',
     b: String(window.GLASSTUBE_BUILD || ''), who: pollWho(),
   });
-  deliveryChain = deliveryChain.then(function () {
-    return fetch('/api/pair', {
+  deliveryChain = deliveryChain.then(function () { return deliveryPost(body); });
+}
+
+/* One report, in order after the one before, but never holding up the next
+   for more than DELIVERY_POST_MS: a request that hangs is abandoned. */
+const DELIVERY_POST_MS = 8000;
+function deliveryPost(body) {
+  const ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+  return new Promise(function (resolve) {
+    const timer = setTimeout(function () {
+      if (ctrl) ctrl.abort();
+      resolve();
+    }, DELIVERY_POST_MS);
+    fetch('/api/pair', Object.assign({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: body,
-    }).catch(function () { /* the server falls back to its own timeout */ });
+    }, ctrl ? { signal: ctrl.signal } : {}))
+      .catch(function () { /* the server falls back to its own timeout */ })
+      .then(function () { clearTimeout(timer); resolve(); });
   });
 }
 
