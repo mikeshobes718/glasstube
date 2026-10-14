@@ -1326,7 +1326,6 @@ function fitPending(root) {
 
 function renderList(title, items, emptyText, kind, emptyAction) {
   listKind = kind || '';
-  $('#list-title').textContent = title;
   const box = $('#list-items');
   box.innerHTML = '';
   if (!items.length) {
@@ -1345,6 +1344,7 @@ function renderList(title, items, emptyText, kind, emptyAction) {
     if (emptyAction) items = [Object.assign({ key: 'empty-action' }, emptyAction)];
   }
   const fits = [];
+  const textFits = [];
   const page = listPageItems(items, title, emptyText, kind, emptyAction);
   box.dataset.countBase = page.base;
   box.dataset.countTotal = page.total;
@@ -1377,7 +1377,11 @@ function renderList(title, items, emptyText, kind, emptyAction) {
       const label = document.createElement('span');
       label.className = 'list-label';
       label.textContent = item.label;
+      // Video rows share one slot; full-width text rows are fitted on their
+      // own so a long name ends on a word, not mid-word. The Play all pill
+      // sizes to its label, so it has no width of its own to fit against.
       if (item.thumb) fits.push([label, item.label, 2]);
+      else if (!/\bis-action\b/.test(item.cls || '')) textFits.push([label, item.label, 1]);
       copy.appendChild(label);
       if (item.sub) {
         const sub = document.createElement('small');
@@ -1392,7 +1396,10 @@ function renderList(title, items, emptyText, kind, emptyAction) {
   }
   fitText(fits, ROW_FIT);
   show('list');
-  listCount();
+  fitText(textFits);
+  listCount(true);
+  // After the counter is set: the title fills what the counter leaves.
+  fitText([[$('#list-title'), title, 1]]);
 }
 
 /* One page of a long list. The page is kept on the list's nav entry; a
@@ -1449,21 +1456,26 @@ function listPageItems(items, title, emptyText, kind, emptyAction) {
 /* 'n/N' to the right of the list title: the focused row among the counted
    rows (videos, channels, playlists; not Play all or paging rows), as its
    position in the whole list when the list is paged. */
-function listCount() {
+function listCount(noFit) {
   const el = $('#list-count');
   const box = $('#list-items');
   if (!el || !box) return;
   const rows = [].slice.call(box.querySelectorAll('[data-count]'));
   const base = Number(box.dataset.countBase) || 0;
   const total = Math.max(rows.length, Number(box.dataset.countTotal) || 0);
-  if (total < 2) { el.textContent = ''; return; }
   const i = rows.indexOf(document.activeElement);
-  el.textContent = (i >= 0 ? (base + i + 1) + '/' : '') + total;
+  const next = total < 2 ? '' : (i >= 0 ? (base + i + 1) + '/' : '') + total;
+  // Tabular digits: the counter only changes width when its length does,
+  // and only then does the title's room (and so its word cut) change.
+  const resized = el.textContent.length !== next.length;
+  el.textContent = next;
+  const t = $('#list-title');
+  if (resized && !noFit && t && t._fitText != null) fitText([[t, t._fitText, 1]]);
 }
 
 {
   const listBox = $('#list-items');
-  if (listBox) listBox.addEventListener('focusin', listCount);
+  if (listBox) listBox.addEventListener('focusin', () => listCount());
 }
 
 function videoItems(videos, onPick) {
@@ -3257,12 +3269,12 @@ function moveKey(dr, dc) {
 }
 
 /* Left is the app-wide back gesture. Here it only goes back from the left
-   edge (field, first chip, or A) with nothing typed; anywhere else it moves
-   the cursor, so it can never throw a query away. */
+   edge (field or A) with nothing typed; anywhere else it moves the cursor, so
+   it can never throw a query away. The chips row wraps both ways, like Right. */
 function searchLeftIsBack() {
   if (typed) return false;
   if (keyRow === KB_INPUT_ROW) return true;
-  if (keyRow === KB_CHIP_ROW) return chipIdx === 0;
+  if (keyRow === KB_CHIP_ROW) return false;
   return keyRow === 0 && keyCol === 0;
 }
 

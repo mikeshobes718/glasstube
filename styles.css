@@ -1308,7 +1308,9 @@ body.toast-up:not(.hud-player) #screen-home { padding-bottom: var(--toast-room, 
   min-width: 0;
 }
 .list-head .title {
-  flex: 1 1 auto;
+  /* Basis 0: the title's width is what the counter leaves, never its own
+     (fitted) text, so fitText measures a definite width. */
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
