@@ -87,6 +87,14 @@ const Player = (() => {
     el.classList.remove('hidden');
   }
 
+  /* hqdefault (480x360) rather than the phone's mqdefault (320x180), which
+     looked blurry stretched to 600 wide. object-fit: cover crops its bars. */
+  function posterFor(video) {
+    const id = String((video && video.id) || '');
+    if (/^[A-Za-z0-9_-]{11}$/.test(id)) return 'https://i.ytimg.com/vi/' + id + '/hqdefault.jpg';
+    return (video && video.thumb) || '';
+  }
+
   /* GlassSound and GlassPrefs are top-level consts, which never become
      window properties, so these must name them directly. */
   function soundOn() {
@@ -391,7 +399,10 @@ const Player = (() => {
   function applyPicture() {
     const wrap = document.getElementById('yt-wrap');
     if (!wrap) return;
-    wrap.classList.toggle('audio-only', !!(prefs() && prefs().audioOnly()));
+    const audio = !!(prefs() && prefs().audioOnly());
+    wrap.classList.toggle('audio-only', audio);
+    // Switching back to Video mid-play: the poster must not cover the picture.
+    if (!audio && hasPlayed) hidePoster();
   }
 
   function applyAll() {
@@ -858,7 +869,7 @@ const Player = (() => {
     resetSoft();
     loadAt = Date.now();
     growthAt = loadAt;
-    showPoster(video.thumb || ('https://i.ytimg.com/vi/' + video.id + '/hqdefault.jpg'));
+    showPoster(posterFor(video));
     if (lastRoute === 'file') return loadFile(video, autoplay, startAt);
     if (lastRoute === 'proxy') return loadProxy(video, autoplay, startAt);
     if (lastRoute === 'embed') return loadEmbed(video, autoplay, startAt);
@@ -931,7 +942,11 @@ const Player = (() => {
 
   function seek(delta) {
     if (html5) {
-      try { html5.currentTime = Math.max(0, (html5.currentTime || 0) + delta); } catch (e) { /* ignored */ }
+      // Stop a second short of the end, so a seek never ends the video by accident.
+      const d = html5.duration;
+      let t = Math.max(0, (html5.currentTime || 0) + delta);
+      if (delta > 0 && Number.isFinite(d) && d > 0) t = Math.min(t, Math.max(html5.currentTime || 0, d - 1));
+      try { html5.currentTime = t; } catch (e) { /* ignored */ }
       return;
     }
     if (raw) {
