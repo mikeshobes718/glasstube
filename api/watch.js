@@ -6,6 +6,12 @@ import { loadSession, withSession } from './auth/_google.js';
 const VIDEO_RE = /^[a-zA-Z0-9_-]{11}$/;
 const CHUNK = 2 * 1024 * 1024;
 const cache = new Map();
+/* Failed resolves, per id, for 10 minutes. A video YouTube refuses keeps
+   refusing, and each attempt costs every client shape in turn, so a repeat
+   answers from here in well under a second. */
+const failCache = new Map();
+const FAIL_TTL_MS = 10 * 60 * 1000;
+const RESOLVE_TIMEOUT_MS = 8000;
 
 const ANDROID = {
   key: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
@@ -223,10 +229,7 @@ function keepMedia(id, got, notes) {
    used to, so try every guest shape before falling back to the signed-in WEB
    client. A visitorData lifted from a real page load is what separates a
    "browser that has been here" from a bare bot on some of these. */
-async function resolve(id, auth) {
-  const hit = cache.get(id);
-  if (hit && hit.exp > Date.now()) return hit;
-  const notes = [];
+async function resolveOnce(id, auth, notes) {
   const visitor = await visitorId();
   const guests = [ANDROID_SDKLESS, ANDROID, ANDROID_VR, IOS];
   for (let i = 0; i < guests.length; i++) {
@@ -248,6 +251,45 @@ async function resolve(id, auth) {
   const err = new Error(notes.join(' | '));
   err.notes = notes;
   throw err;
+}
+
+/* resolveOnce() with an 8s ceiling and the negative cache in front. The
+   whole chain used to take 61-65s to fail in production, which is longer
+   than any client waits. */
+async function resolve(id, auth) {
+  const hit = cache.get(id);
+  if (hit && hit.exp > Date.now()) return hit;
+  const key = id + (auth ? ':a' : ':g');
+  const miss = failCache.get(key);
+  if (miss && miss.exp > Date.now()) {
+    const err = new Error(miss.message);
+    err.notes = miss.notes.concat(['cached-fail']);
+    throw err;
+  }
+  if (miss) failCache.delete(key);
+  const notes = [];
+  let timer = null;
+  const timeout = new Promise(function (_, reject) {
+    timer = setTimeout(function () {
+      const err = new Error('resolve timed out after ' + (RESOLVE_TIMEOUT_MS / 1000) + 's' +
+        (notes.length ? ' | ' + notes.join(' | ') : ''));
+      err.notes = notes.concat(['timeout']);
+      reject(err);
+    }, RESOLVE_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([resolveOnce(id, auth, notes), timeout]);
+  } catch (e) {
+    if (failCache.size > 500) failCache.clear();
+    failCache.set(key, {
+      exp: Date.now() + FAIL_TTL_MS,
+      message: String((e && e.message) || e || 'resolve failed'),
+      notes: ((e && e.notes) || notes).slice(),
+    });
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /* The glasses hand back whatever session the phone gave them so a signed-in

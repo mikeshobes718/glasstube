@@ -100,6 +100,15 @@ let skipIds = {};
 let playFails = [];
 let blockedFor = '';
 let needGesture = false;
+// WP5: one counter per openPlayer call; every player timer checks it.
+let openSeq = 0;
+let stallWatch = 0;
+let proxyDemoted = false;
+let routeSaved = '';
+let progressAt = 0;
+let loadText = '';
+// Phone files by video id, in memory only: { u, exp }. Never persisted.
+const fileFor = {};
 let sleepUntil = 0;
 let sleepWatch = 0;
 let channelPage = 0;
@@ -719,6 +728,7 @@ function progressLoad() {
 
 function progressSave() {
   if (!nowPlaying || typeof Player === 'undefined') return;
+  progressAt = Date.now();
   const snap = Player.snapshot();
   if (snap.duration && snap.time > 1) markSet(nowPlaying.id, snap.time, snap.duration);
   if (!snap.duration || snap.time < 5) return;
@@ -744,6 +754,13 @@ function progressSave() {
     }));
   } catch (e) { /* optional */ }
   renderContinue();
+}
+
+/* While playing, at most one save every 10s. Pause, ended, exit, hidden and
+   pagehide save at once through progressSave(). */
+function progressTick() {
+  if (Date.now() - progressAt < 10000) return;
+  progressSave();
 }
 
 function progressClear() {
@@ -1256,7 +1273,8 @@ function setLoading(on, title, text) {
   el.classList.toggle('hidden', !on);
   if (on) setPlayGate(false);
   if (name) name.textContent = title || (nowPlaying && nowPlaying.title) || 'YouTube video';
-  if (msg) msg.textContent = netOffline ? offlineText() : pushGateText(text || 'Loading...');
+  if (text) loadText = text;
+  if (msg) msg.textContent = netOffline ? offlineText() : pushGateText(loadText || 'Loading video…');
 }
 
 function setPlayGate(on, title, text) {
@@ -1278,12 +1296,14 @@ function setPlayGate(on, title, text) {
 function savedRoute() {
   try {
     const r = localStorage.getItem(ROUTE_KEY) || '';
+    if (!routeSaved) routeSaved = r;
     return Player.routes().indexOf(r) >= 0 ? r : '';
   } catch (e) { return ''; }
 }
 
 function rememberRoute(r) {
-  if (!r) return;
+  if (!r || r === routeSaved) return;
+  routeSaved = r;
   try { localStorage.setItem(ROUTE_KEY, String(r)); } catch (e) { /* private mode */ }
 }
 
@@ -1300,7 +1320,42 @@ function buildRouteChain(video) {
     chain.splice(i, 1);
     chain.splice(floor, 0, first);
   }
+  // A proxy that never produced metadata is not tried early again this
+  // session; it moves to the end of the fallbacks.
+  const p = chain.indexOf('proxy');
+  if (proxyDemoted && p >= 0 && p < chain.length - 1) {
+    chain.splice(p, 1);
+    chain.push('proxy');
+  }
   return chain;
+}
+
+/* Loading text that says what is happening and stays put: the phone file
+   first, then 'Trying another way… (2 of 4)' for each fallback. */
+function routeLoadText() {
+  const r = wayChain[wayPos];
+  if (wayPos === 0) return r === 'file' ? 'Getting video from your phone…' : 'Loading video…';
+  return 'Trying another way… (' + (wayPos + 1) + ' of ' + wayChain.length + ')';
+}
+
+/* The phone file's expiry, from Google's expire= parameter, in ms. */
+function fileExpiry(u) {
+  const m = String(u || '').match(/[?&]expire=(\d+)/);
+  return m ? Number(m[1]) * 1000 : 0;
+}
+
+function fileRemember(v) {
+  if (!v || !v.id || !v.u) return;
+  if (typeof Player !== 'undefined' && Player.isMediaUrl && !Player.isMediaUrl(v.u)) return;
+  fileFor[v.id] = { u: String(v.u), exp: fileExpiry(v.u) };
+}
+
+/* A file the phone sent earlier this session, while it has over 10 minutes
+   left. Continue, Recents, the queue and Missed all come through here. */
+function fileReuse(v) {
+  if (!v || !v.id || v.u) return;
+  const f = fileFor[v.id];
+  if (f && f.exp - Date.now() > 10 * 60 * 1000) v.u = f.u;
 }
 
 function routeLabel(r) {
@@ -1371,6 +1426,37 @@ function blockedText(code, err) {
   return 'Nothing could play this one (' + (code || 'no code') + '). Try another video.';
 }
 
+/* The most informative failure among this video's attempts. fails are
+   playFails rows: 'id · route · code N · error'. A refused or unplayable
+   phone file says more than the fallbacks that failed after it. */
+function bestFailText(fails, code, err) {
+  const rows = (fails || []).map(String);
+  const codeOf = function (row) {
+    const m = row.match(/ · code (\d+) · /);
+    return m ? Number(m[1]) : 0;
+  };
+  for (let i = 0; i < rows.length; i++) {
+    const c = codeOf(rows[i]);
+    if (c === 100 || c === 2 || c === 101 || c === 150 || c === 153) return blockedText(c, rows[i]);
+  }
+  if (phoneOutOfDate()) return blockedText(0, '');
+  const fileRows = rows.filter(function (row) { return / · file · /.test(row); });
+  if (fileRows.some(function (row) { return /expired|expire|\b410\b/i.test(row); })) {
+    return 'The file from your phone expired. Send it again from your phone.';
+  }
+  if (fileRows.some(function (row) { return /\b403\b|Media error|no source|no progress/i.test(row); })) {
+    return 'Your glasses aren\'t on the same WiFi as your phone. Join the same WiFi and send it again.';
+  }
+  if (fileRows.some(function (row) { return /No file from the phone/i.test(row); })) {
+    return blockedText(0, 'No file from the phone');
+  }
+  return blockedText(code || 0, err || (rows[0] || ''));
+}
+
+function failsFor(id) {
+  return playFails.filter(function (row) { return row.indexOf(id + ' · ') === 0; });
+}
+
 function skipUnplayable(err, code) {
   pushFailed();
   playFailNote(err, code);
@@ -1387,9 +1473,11 @@ function skipUnplayable(err, code) {
   setLoading(false);
   setPlayGate(false);
   blockedFor = (nowPlaying && nowPlaying.id) || '';
+  stallStop();
+  const why = bestFailText(failsFor(blockedFor), code, err);
   $('#player-error').textContent = queue.length > 1
-    ? 'Nothing in this list would play. ' + blockedText(code, err)
-    : blockedText(code, err);
+    ? 'Nothing in this list would play. ' + why
+    : why;
   $('#player-error').classList.remove('hidden');
   updateChrome();
 }
@@ -1399,10 +1487,18 @@ function skipUnplayable(err, code) {
 function tryNextWay(videoId, err, code) {
   if (!videoId || isDeadVideo(code) || wayFor !== videoId) return false;
   if (loadRetry) return true;
+  // The gate is waiting for a pinch: the route is not failing, the browser
+  // is. Hold here; the pinch decides.
+  if (needGesture || (typeof Player !== 'undefined' && Player.autoplayBlocked && Player.autoplayBlocked())) {
+    return true;
+  }
   if (wayPos + 1 >= wayChain.length) return false;
   playFailNote(err, code);
   wayPos += 1;
+  stallStop();
+  const seq = openSeq;
   loadRetry = setTimeout(function () {
+    if (seq !== openSeq) return;
     loadRetry = 0;
     if (current === 'player' && nowPlaying && nowPlaying.id === videoId) {
       openPlayer(queueIndex, true, resumeAt(videoId), { retry: true });
@@ -1416,6 +1512,9 @@ function openPlayer(index, autoplay, startAt, opts) {
   opts = opts || {};
   queueIndex = index;
   const video = queue[index];
+  const openId = ++openSeq;
+  stallStop();
+  fileReuse(video);
   if (!opts.retry) {
     if (loadRetry) {
       clearTimeout(loadRetry);
@@ -1437,7 +1536,7 @@ function openPlayer(index, autoplay, startAt, opts) {
   if (buf) buf.style.width = '0%';
   needGesture = false;
   setPlayGate(false);
-  setLoading(true, video.title, wayPos === 0 ? 'Loading...' : 'Trying ' + routeLabel(wayChain[wayPos]) + '...');
+  setLoading(true, video.title, routeLoadText());
   show('player');
   if (typeof Player === 'undefined') {
     $('#player-error').textContent = 'Player script missing.';
@@ -1446,9 +1545,10 @@ function openPlayer(index, autoplay, startAt, opts) {
   }
   const attempt = wayPos;
   const route = wayChain[wayPos] || 'proxy';
-  Player.setHandlers(playNext, updateChrome);
+  Player.setHandlers(playNext, updateChrome, playerEvent);
   hudNote('route', { route: route, attempt: attempt, chain: wayChain.join('>'), hasU: !!video.u });
   Player.load(video, autoplay, startAt || 0, route).then(function (ok) {
+    if (openId !== openSeq) return;
     hudNote('loaded', { route: route, ok: !!ok, err: ok ? '' : String(Player.lastError() || ''),
       code: Player.lastCode ? Player.lastCode() : 0 });
     if (!ok) {
@@ -1457,50 +1557,71 @@ function openPlayer(index, autoplay, startAt, opts) {
       if (!tryNextWay(video.id, err, code)) skipUnplayable(err, code);
     } else {
       setOffline(false);
-      prefetchNext();
     }
     updateChrome();
-    if (autoplay) {
-      setTimeout(function () {
-        if (current !== 'player') return;
-        if (nowPlaying && nowPlaying.id !== video.id) return;
-        if (wayPos !== attempt) return;
-        const snap = Player.snapshot();
-        hudNote('check3s', { route: route, playing: !!snap.playing, paused: !!snap.paused,
-          error: snap.error || '', time: snap.time });
-        if (snap.playing || snap.paused || snap.error) return;
-        needGesture = true;
-        setPlayGate(true, video.title, 'Enter to play');
-        updateChrome();
-      }, 3200);
-      setTimeout(function () {
-        if (current !== 'player') return;
-        if (nowPlaying && nowPlaying.id !== video.id) return;
-        if (wayPos !== attempt) return;
-        const snap = Player.snapshot();
-        if (snap.playing || snap.paused || snap.ended || snap.error) return;
-        if (snap.time > 0.4) return;
-        hudNote('stalled', { route: route, time: snap.time, gate: needGesture });
-        if (!tryNextWay(video.id, routeLabel(route) + ' stalled', 0) && !needGesture) {
-          skipUnplayable(routeLabel(route) + ' stalled', 0);
-        }
-      }, 12000);
-    }
+    if (!ok || !autoplay) return;
+    // Diagnostics only. The gate comes from a refused play(), not a timer.
+    setTimeout(function () {
+      if (openId !== openSeq || current !== 'player') return;
+      const snap = Player.snapshot();
+      hudNote('check3s', { route: route, playing: !!snap.playing, paused: !!snap.paused,
+        error: snap.error || '', time: snap.time, readyState: snap.readyState,
+        buffered: Math.round((snap.buffered || 0) * 10) / 10, playRejected: snap.playRejected || '',
+        blocked: !!snap.blocked });
+    }, 3000);
+    stallStart(openId, video, route);
   });
 }
 
-/* Warm the next video on the server route so the gap between tracks is a
-   beat, not a stall. Harmless when the route ends up being the phone file. */
-function prefetchNext() {
-  const nxt = queue[queueIndex + 1] || (prefs && prefs.repeat() === 'all' ? queue[0] : null);
-  if (!nxt || !nxt.id || nxt.id === (nowPlaying && nowPlaying.id)) return;
-  if (nxt.u || prefetched[nxt.id]) return;
-  prefetched[nxt.id] = true;
-  try {
-    fetch('/api/watch?v=' + encodeURIComponent(nxt.id) + (ytSession ? '&s=' + encodeURIComponent(ytSession) : ''), {
-      method: 'HEAD',
-    }).catch(function () { /* warming only */ });
-  } catch (e) { /* warming only */ }
+/* Once a second until this attempt has played: give the route up only on
+   evidence (Player.stallReason), and never while the gate waits. */
+function stallStart(openId, video, route) {
+  stallStop();
+  stallWatch = setInterval(function () {
+    if (openId !== openSeq || current !== 'player') {
+      stallStop();
+      return;
+    }
+    const snap = Player.snapshot();
+    if (snap.hasPlayed) {
+      stallStop();
+      return;
+    }
+    if (needGesture || snap.blocked) return;
+    const why = Player.stallReason ? Player.stallReason() : '';
+    if (!why) return;
+    stallStop();
+    hudNote('stalled', { route: route, time: snap.time, why: why, readyState: snap.readyState });
+    if (route === 'proxy' && /metadata/.test(why)) proxyDemoted = true;
+    if (!tryNextWay(video.id, routeLabel(route) + ' ' + why, 0)) {
+      skipUnplayable(routeLabel(route) + ' ' + why, 0);
+    }
+  }, 1000);
+}
+
+function stallStop() {
+  if (stallWatch) clearInterval(stallWatch);
+  stallWatch = 0;
+}
+
+/* Events the player raises beyond state changes. */
+function playerEvent(kind) {
+  if (current !== 'player') return;
+  if (kind === 'muted') {
+    showToast('Sound off · pinch for sound', 'info', 8000);
+    return;
+  }
+  if (kind === 'blocked') {
+    needGesture = true;
+    if (loadRetry) {
+      clearTimeout(loadRetry);
+      loadRetry = 0;
+    }
+    setPlayGate(true, nowPlaying && nowPlaying.title, 'Pinch to play');
+    hudNote('autoplay-blocked', { route: Player.lastRoute ? Player.lastRoute() : '' });
+    return;
+  }
+  if (kind === 'pause' || kind === 'ended') progressSave();
 }
 
 function playNext() {
@@ -1637,7 +1758,7 @@ function pushFailed() {
 
 /* setLoading keeps the receipt on the load gate while a push starts. */
 function pushGateText(text) {
-  if (text === 'Loading...' && pushStartId && nowPlaying && nowPlaying.id === pushStartId &&
+  if (wayPos === 0 && !/Buffering/.test(text) && pushStartId && nowPlaying && nowPlaying.id === pushStartId &&
       Date.now() - pushStartAt < 60000) return PUSH_START_TEXT;
   return text;
 }
@@ -1817,6 +1938,7 @@ function applyPush(dest) {
       }
     });
   }
+  list.forEach(fileRemember);
   const ordered = maybeShuffle(list);
   // The pushed list goes on the nav stack under the player, so Back lands on
   // it with the played row focused. Navigate before replacing the queue:
@@ -1874,11 +1996,11 @@ function updateChrome() {
   const nxt = queue[queueIndex + 1] || (prefs && prefs.repeat() === 'all' ? queue[0] : null);
   let phase = 'Loading';
   if (snap.playing) phase = 'Enter pause';
-  else if (snap.error && nowPlaying && blockedFor === nowPlaying.id) phase = 'Blocked';
+  else if (nowPlaying && blockedFor === nowPlaying.id) phase = 'Blocked';
   else if (snap.error) phase = 'Trying another way';
   else if (snap.paused) phase = 'Paused · Enter play';
   else if (snap.ended) phase = 'Ended · Enter play';
-  else if (needGesture) phase = 'Enter to play';
+  else if (needGesture || snap.blocked) phase = 'Pinch to play';
   else if (snap.buffering) phase = 'Buffering';
   $('#player-hint').textContent = pos + phase +
     (queue.length > 1 ? ' · Up last · Down next' : ' · Up -10s') +
@@ -1906,7 +2028,7 @@ function updateChrome() {
       loadRetry = 0;
     }
     rememberRoute(snap.route);
-    progressSave();
+    progressTick();
     pushPlayed();
   } else if (snap.error) {
     needGesture = false;
@@ -1918,20 +2040,28 @@ function updateChrome() {
       showRelayOffer();
       return;
     }
-    if (id && tryNextWay(id, snap.error, code)) {
-      setLoading(true, title, 'Trying ' + routeLabel(wayChain[wayPos]) + '...');
+    if (needGesture || snap.blocked) {
+      setPlayGate(true, title, 'Pinch to play');
+    } else if (id && tryNextWay(id, snap.error, code)) {
+      setLoading(true, title, routeLoadText());
     } else if (id) {
       skipUnplayable(snap.error, code);
     }
+  } else if (nowPlaying && blockedFor === nowPlaying.id) {
+    // Every route failed: the final error stays, never 'Loading'.
+    setLoading(false);
+    setPlayGate(false);
+    showRelayOffer();
   } else if (snap.paused || snap.ended) {
     needGesture = false;
     setPlayGate(true, title, snap.ended ? 'Ended · Enter to play' : 'Paused · Enter to play');
-  } else if (needGesture) {
-    setPlayGate(true, title, 'Enter to play');
+  } else if (needGesture || snap.blocked) {
+    setPlayGate(true, title, 'Pinch to play');
   } else if (snap.buffering && snap.time > 0.4) {
-    setLoading(true, title, 'Buffering...');
+    setLoading(true, title, 'Buffering…');
   } else {
-    setLoading(true, title, 'Loading...');
+    // Keep whatever the route said ('Getting video from your phone…').
+    setLoading(true, title);
   }
 }
 
@@ -2890,6 +3020,12 @@ function handlePlayerKey(e) {
   if (key === DPAD.SELECT || key === ' ') {
     e.preventDefault();
     needGesture = false;
+    if (Player.mutedByPolicy()) {
+      Player.unmute();
+      if (/^Sound off/.test(($('#toast') || {}).textContent || '')) hideToast();
+      updateChrome();
+      return;
+    }
     if (typeof Player !== 'undefined') Player.toggle();
     setPlayGate(false);
     updateChrome();
@@ -3012,7 +3148,8 @@ document.addEventListener('keydown', function (e) {
   const now = Date.now();
   // Any resolved gesture is a user activation: let WP5's player unlock audio
   // on it synchronously, inside the gesture.
-  if (typeof Player !== 'undefined' && typeof Player.unlock === 'function') {
+  // Player.unlock (WP5) runs again whenever the element is still locked.
+  if (!Player.unlocked()) {
     try { Player.unlock(); } catch (x) { /* unlock is best effort */ }
   }
   // WP4: a push held while hidden plays on the first key when the WebView
@@ -3337,6 +3474,15 @@ function ensureListening() {
 // Seed the nav stack's root in history, so the first pushState has a depth-0
 // entry to come back to (system Back on firmware v125.1+, and ArrowLeft).
 try { history.replaceState({ gt: 1, d: 0 }, ''); } catch (e) { /* no history API */ }
+
+// Progress is saved at most every 10s while playing; leaving or hiding the
+// page saves now.
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'hidden' && current === 'player') progressSave();
+});
+window.addEventListener('pagehide', function () {
+  if (current === 'player') progressSave();
+});
 sessionStore(sessionLoad());
 renderSettings();
 pairBoot();

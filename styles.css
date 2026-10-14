@@ -470,6 +470,23 @@ body.hud-player .errbar { display: none !important; }
 #yt-poster.hidden { display: none !important; }
 
 #yt-wrap.audio-only #yt-slot { visibility: hidden; }
+
+/* WP5: one persistent <video> for the file and proxy routes */
+#yt-video-slot,
+#yt-video {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 600px;
+  height: 338px;
+  border: 0;
+  pointer-events: none;
+  object-fit: contain;
+  background: #000;
+}
+#yt-video-slot.hidden { display: none !important; }
+#yt-wrap.audio-only #yt-video-slot { visibility: hidden; }
+
 #yt-wrap.audio-only #yt-poster { display: block !important; opacity: 1; }
 
 .load-gate,

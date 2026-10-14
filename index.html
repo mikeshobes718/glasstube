@@ -14,7 +14,7 @@
 <link rel="preload" href="/icon-192.png?v=510853de" as="image">
 <meta name="theme-color" content="#000000">
 <meta name="referrer" content="origin">
-<link rel="stylesheet" href="/styles.css?v=9d0a73b1">
+<link rel="stylesheet" href="/styles.css?v=40391ec2">
 <script>
 (function () {
   function onPhone() {
@@ -59,7 +59,7 @@
 })();
 </script>
 <script>
-window.GLASSTUBE_BUILD = 'a4a3e96b';
+window.GLASSTUBE_BUILD = '2931c420';
 window.glasstubeErrors = [];
 window.glasstubeNoise = function (text, src) {
   var t = String(text || '');
@@ -129,7 +129,8 @@ window.addEventListener('unhandledrejection', function (e) {
 
 <section id="screen-player" class="screen screen-flush hidden">
   <div id="yt-wrap">
-    <div id="yt-slot"><iframe id="yt-host" src="about:blank" referrerpolicy="origin" allow="autoplay; encrypted-media; picture-in-picture" tabindex="-1"></iframe></div>
+    <div id="yt-slot"><iframe id="yt-host" src="about:blank" referrerpolicy="origin" allow="autoplay; encrypted-media; picture-in-picture" tabindex="-1" aria-hidden="true"></iframe></div>
+    <div id="yt-video-slot" class="hidden"><video id="yt-video" playsinline webkit-playsinline disablepictureinpicture preload="auto" muted></video></div>
     <img id="yt-poster" alt="">
     <div id="player-bar"><div id="player-buffer"></div><div id="player-fill"></div></div>
     <div id="player-time">0:00 / 0:00</div>
@@ -211,14 +212,14 @@ window.addEventListener('unhandledrejection', function (e) {
   </div>
 </section>
 
-<div id="toast" class="toast hidden"></div>
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 <div id="status" class="status hidden"></div>
 <div id="nav-foot" class="nav-foot hidden" aria-hidden="true">◀ Back</div>
 
 <script src="/sound.js?v=532aca8d"></script>
 <script src="/prefs.js?v=e937b826"></script>
-<script src="/player.js?v=3cd008a3"></script>
-<script src="/app.js?v=7b2d125c"></script>
+<script src="/player.js?v=7583243a"></script>
+<script src="/app.js?v=d44b2993"></script>
 </div>
 </body>
 </html>
