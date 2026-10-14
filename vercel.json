@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/push.js": {
+      "maxDuration": 60
+    }
+  },
   "headers": [
     {
       "source": "/(.*)",

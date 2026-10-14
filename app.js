@@ -85,6 +85,7 @@ let pairCode = '';
 let pairLink = '';
 let pairTimer = null;
 let pairLastSeq = -1;
+let pairReplaces = ''; // WP6: link token a fresh mint replaces
 let pairPolls = 0;
 let pairMintTimer = 0;
 let pairState = 'not paired';
@@ -1286,6 +1287,8 @@ function setPlayGate(on, title, text) {
   if (on) {
     const load = $('#load-gate');
     if (load) load.classList.add('hidden');
+    // WP6: the pushed video is waiting for a pinch.
+    if (nowPlaying && deliveryFor(nowPlaying.id)) deliveryReport('pinch');
   }
   if (name) name.textContent = title || (nowPlaying && nowPlaying.title) || 'YouTube video';
   if (msg && text) msg.textContent = text;
@@ -1479,6 +1482,8 @@ function skipUnplayable(err, code) {
     ? 'Nothing in this list would play. ' + why
     : why;
   $('#player-error').classList.remove('hidden');
+  // WP6: the final error, in WP5's bestFailText sentence the wearer sees.
+  if (nowPlaying && deliveryFor(nowPlaying.id)) deliveryReport('failed', why);
   updateChrome();
 }
 
@@ -1526,6 +1531,7 @@ function openPlayer(index, autoplay, startAt, opts) {
   }
   if (blockedFor && blockedFor !== video.id) blockedFor = '';
   nowPlaying = video;
+  deliveryVideo(video.id);
   recentsAdd(video);
   $('#player-title').textContent = video.title || 'YouTube video';
   $('#player-channel').textContent = [video.channel || '', video.meta || ''].filter(Boolean).join(' · ');
@@ -1862,19 +1868,24 @@ function handlePush(dest, seq, special) {
   hudNote('push', { seq: seq, stale: stale, held: held, ageS: ageS,
     hasU: !!(dest.u || first.u) });
   if (special) {
+    // WP6: channels, channel and session pushes stay immediate on the server.
+    deliveryReport('got');
+    if (deliveryPush) deliveryPush.done = true;
     applyPush(dest);
     return;
   }
   const sentAt = pushSentAt(dest, gotAt);
   if (stale) {
     pushMissed(dest, sentAt);
-    if (typeof deliveryReport === 'function') deliveryReport('missed');
+    // WP6: 'missed' replaces 'got' for a stale push (it still consumes it).
+    deliveryReport('missed', 'stale');
     return;
   }
+  deliveryReport('got');
   if (held) {
     if (pendingPush) pushMissed(pendingPush.dest, pendingPush.sentAt);
-    pendingPush = { dest: dest, sentAt: sentAt };
-    if (typeof deliveryReport === 'function') deliveryReport('hidden');
+    pendingPush = { dest: dest, sentAt: sentAt, seq: seq };
+    deliveryReport('hidden');
     return;
   }
   playPush(dest, sentAt);
@@ -1888,7 +1899,8 @@ function releasePendingPush() {
   pendingPush = null;
   if (Date.now() - p.sentAt > PUSH_FRESH_MS) {
     pushMissed(p.dest, p.sentAt);
-    if (typeof deliveryReport === 'function') deliveryReport('missed');
+    // WP6: only the push being tracked; a newer push has taken over otherwise.
+    if (deliveryPush && deliveryPush.seq === p.seq) deliveryReport('missed', 'held');
   } else {
     playPush(p.dest, p.sentAt);
   }
@@ -2030,6 +2042,8 @@ function updateChrome() {
     rememberRoute(snap.route);
     progressTick();
     pushPlayed();
+    // WP6: the first 'playing' of the pushed video confirms the delivery.
+    if (nowPlaying && deliveryFor(nowPlaying.id)) deliveryReport('playing');
   } else if (snap.error) {
     needGesture = false;
     const id = nowPlaying && nowPlaying.id;
@@ -2523,9 +2537,16 @@ function newPairCode() {
   if (current === 'phone') renderPhone();
   $('#pair-code').textContent = '------';
   $('#pair-help').textContent = netOffline ? offlineText() : 'Getting a code…';
-  fetch('/api/pair', { method: 'POST' })
+  // WP6: after an unlink, tell the server which link this code replaces, so
+  // the old phone hears it is no longer linked instead of pushing into a void.
+  const mint = pairReplaces
+    ? { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ replaces: pairReplaces }) }
+    : { method: 'POST' };
+  fetch('/api/pair', mint)
     .then(r => r.json())
     .then(d => {
+      if (d.ok && d.code) pairReplaces = '';
       if (!d.ok || !d.code) {
         pairState = d.error || 'pair failed';
         if (isNetErr(d.error)) {
@@ -2661,6 +2682,51 @@ function hudNote(ev, extra) {
   } catch (e) { /* diagnostics only */ }
 }
 
+/* WP6: server-confirmed delivery. The glasses tell the server what happened to
+   the push they are tracking, and /api/push waits for it, so the phone says
+   'Playing on your glasses' only when they are. One push is tracked at a time:
+   the newest one. Each state goes out at most once, in order, and nothing is
+   sent after a terminal state. 'got' replaces the plain ack and, like 'missed',
+   consumes the push on the server. handlePush decides which one to send. */
+const DELIVERY_TERMINAL = { playing: 1, failed: 1, missed: 1 };
+let deliveryPush = null;
+let deliveryChain = Promise.resolve();
+
+function deliveryTrack(seq) {
+  deliveryPush = { seq: seq, id: '', sent: {}, done: false };
+}
+
+/* Which video of the tracked push is on screen: the first one opened after it
+   arrived, or the next one a queue skips to before anything played. */
+function deliveryVideo(id) {
+  if (!deliveryPush || deliveryPush.done || !id) return;
+  if (!deliveryPush.id || !deliveryPush.sent.playing) deliveryPush.id = id;
+}
+
+function deliveryFor(id) {
+  return !!(deliveryPush && !deliveryPush.done && deliveryPush.id && deliveryPush.id === id);
+}
+
+function deliveryReport(state, detail) {
+  const p = deliveryPush;
+  const code = pairKey();
+  if (!p || p.done || p.sent[state] || !code) return;
+  p.sent[state] = true;
+  if (DELIVERY_TERMINAL[state]) p.done = true;
+  const body = JSON.stringify({
+    code: code, ack: p.seq, state: state,
+    detail: detail ? String(detail).slice(0, 300) : '',
+    b: String(window.GLASSTUBE_BUILD || ''), who: pollWho(),
+  });
+  deliveryChain = deliveryChain.then(function () {
+    return fetch('/api/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body,
+    }).catch(function () { /* the server falls back to its own timeout */ });
+  });
+}
+
 /* The one place a poll response is handled. Single flight: a call while a
    request is out only asks for another one right after it. */
 function pollPair() {
@@ -2679,7 +2745,8 @@ function pollPair() {
   const timeout = setTimeout(function () { if (ctrl) ctrl.abort(); }, POLL_TIMEOUT_MS);
   const url = '/api/pair?code=' + encodeURIComponent(key) +
     '&b=' + encodeURIComponent(window.GLASSTUBE_BUILD || '') +
-    '&i=' + instanceId + '&who=' + pollWho();
+    '&i=' + instanceId + '&who=' + pollWho() +
+    '&vis=' + (document.hidden ? 'hidden' : 'visible');
   let answered = false;
   fetch(url, ctrl ? { signal: ctrl.signal } : {})
     .then(r => {
@@ -2748,11 +2815,9 @@ function pollPair() {
         dest.kind === 'session');
       if (dest && (playable || special) && d.destSeq !== pairLastSeq) {
         pairLastSeq = d.destSeq;
-        fetch('/api/pair', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: pairKey(), ack: d.destSeq }),
-        }).catch(() => {});
+        // WP6: track this push; handlePush sends 'got' (or 'missed' for a
+        // stale one), which replaces the plain ack and consumes the push.
+        deliveryTrack(d.destSeq);
         // Stale, hidden and fresh pushes each go their own way: handlePush.
         handlePush(dest, d.destSeq, !!special);
       }
@@ -3392,6 +3457,8 @@ $('#btn-pair-new').addEventListener('click', () => {
   disarmUnlink();
   hudNote('unlink');
   stopPairPoll();
+  // WP6: only the full link token these glasses held is ever superseded.
+  if (/^[a-f0-9]{64}$/i.test(linkStored())) pairReplaces = linkStored();
   pairIgnoreUrl();
   pairPairedSet(false);
   pairCode = '';
