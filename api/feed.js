@@ -1,12 +1,23 @@
 import { json } from './_rpc.js';
 import { parseYouTube, resolveHandle, channelFeed, channelPage, keepPlayable } from './_yt.js';
 import { searchYouTube } from './_search.js';
+import { suggestYouTube } from './_suggest.js';
 
-/* Two jobs behind one function because the Hobby plan only allows twelve of
+/* Three jobs behind one function because the Hobby plan only allows twelve of
    them: /api/feed?channel=... lists a channel, /api/search?q=... (rewritten
-   here) searches. Both are the no-sign-in paths the glasses use. */
+   here) searches, and /api/suggest?q=... (also rewritten here) answers search
+   suggestions. All are no-sign-in paths the glasses use. */
 export default async function handler(req, res) {
   const q = req.query || {};
+  // Checked first: a suggest request also carries q=, which would otherwise
+  // look like a search.
+  if (String(q.mode || '') === 'suggest') {
+    try {
+      return json(res, 200, await suggestYouTube(q.q));
+    } catch (e) {
+      return json(res, 200, { ok: false });
+    }
+  }
   const term = String(q.q || q.search || '').trim();
   const wantsSearch = String(q.mode || '') === 'search' ||
     (!!term && !q.channel && !q.handle && !q.url);

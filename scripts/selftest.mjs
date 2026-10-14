@@ -300,9 +300,10 @@ async function runPlayback(browser, fileUrl) {
     // traps the wearer: the glasses keep their own back gesture.
     await page.evaluate(() => document.querySelector('[data-menu="search"]').click());
     await page.waitForTimeout(250);
-    // The HUD's input arbiter folds the same key inside 120ms into one gesture
-    // and ignores Enter for 320ms after a swipe, so space the presses out.
+    // Action row is Search | Delete | Clear | Back: Down 4 lands on Search,
+    // Right 3 on Back. Spaced so the input arbiter does not merge presses.
     for (let i = 0; i < 4; i++) { await page.keyboard.press('ArrowDown'); await page.waitForTimeout(200); }
+    for (let i = 0; i < 3; i++) { await page.keyboard.press('ArrowRight'); await page.waitForTimeout(200); }
     const onKey = await page.$eval('.kb-key.kb-on', e => e.textContent);
     await page.waitForTimeout(400);
     await page.keyboard.press('Enter');

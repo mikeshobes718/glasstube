@@ -14,7 +14,7 @@
 <link rel="preload" href="/icon-192.png?v=510853de" as="image">
 <meta name="theme-color" content="#000000">
 <meta name="referrer" content="origin">
-<link rel="stylesheet" href="/styles.css?v=85d4e84c">
+<link rel="stylesheet" href="/styles.css?v=22fb4c92">
 <script>
 (function () {
   function onPhone() {
@@ -59,7 +59,7 @@
 })();
 </script>
 <script>
-window.GLASSTUBE_BUILD = 'b7397b7a';
+window.GLASSTUBE_BUILD = '867a5535';
 window.glasstubeErrors = [];
 window.glasstubeNoise = function (text, src) {
   var t = String(text || '');
@@ -181,8 +181,15 @@ window.addEventListener('unhandledrejection', function (e) {
 
 <section id="screen-search" class="screen hidden">
   <h2 class="title">Search</h2>
-  <div id="kb-text" class="kb-text kb-empty">Type a search</div>
-  <div id="kb-recent" class="kb-recent hidden"></div>
+  <div id="kb-field" class="kb-field">
+    <input id="kb-input" class="kb-input" type="search" enterkeyhint="search"
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+      maxlength="60" placeholder="Pinch to speak or type" aria-label="Search">
+  </div>
+  <div class="kb-chips-row">
+    <div id="kb-chips" class="kb-chips"></div>
+    <span id="kb-hint" class="kb-hint hidden">▲ suggestions</span>
+  </div>
   <div id="kb-grid" class="kb-grid"></div>
 </section>
 
@@ -242,7 +249,7 @@ window.addEventListener('unhandledrejection', function (e) {
 <script src="/sound.js?v=532aca8d"></script>
 <script src="/prefs.js?v=466929eb"></script>
 <script src="/player.js?v=e0cad67a"></script>
-<script src="/app.js?v=267151fc"></script>
+<script src="/app.js?v=abb53779"></script>
 </div>
 </body>
 </html>
