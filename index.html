@@ -14,7 +14,7 @@
 <link rel="preload" href="/icon-192.png?v=510853de" as="image">
 <meta name="theme-color" content="#000000">
 <meta name="referrer" content="origin">
-<link rel="stylesheet" href="/styles.css?v=66d7264a">
+<link rel="stylesheet" href="/styles.css?v=05f5f04e">
 <script>
 (function () {
   function onPhone() {
@@ -59,7 +59,7 @@
 })();
 </script>
 <script>
-window.GLASSTUBE_BUILD = '578ee20f';
+window.GLASSTUBE_BUILD = 'd6ae00e2';
 window.glasstubeErrors = [];
 window.glasstubeNoise = function (text, src) {
   var t = String(text || '');
@@ -110,22 +110,19 @@ window.addEventListener('unhandledrejection', function (e) {
   </header>
   <div class="list list-home screen-body">
     <button class="focusable menu-btn hidden" id="btn-continue" data-menu="continue">Continue<small id="continue-sub"></small></button>
-    <button class="focusable menu-btn hidden" data-menu="queue">Queue<small></small></button>
     <button class="focusable menu-btn" data-menu="search">Search</button>
     <button class="focusable menu-btn" data-menu="phone">From iPhone<small>Paste a YouTube link, it plays here</small></button>
-    <button class="focusable menu-btn hidden" data-menu="library">Library<small>Subscriptions, playlists, liked</small></button>
     <button class="focusable menu-btn" data-menu="recents">Recents</button>
     <button class="focusable menu-btn" data-menu="channels">Channels</button>
     <button class="focusable menu-btn" data-menu="playlists">Playlists</button>
+    <button class="focusable menu-btn hidden" data-menu="library">Library<small>Subscriptions, playlists, liked</small></button>
     <button class="focusable menu-btn" data-menu="settings">Settings</button>
-    <button class="focusable menu-btn" data-menu="debug">Diagnostics</button>
   </div>
 </section>
 
 <section id="screen-list" class="screen hidden">
-  <h2 id="list-title" class="title"></h2>
+  <div class="list-head"><h2 id="list-title" class="title"></h2><span id="list-count" class="list-count"></span></div>
   <div id="list-items" class="list screen-body"></div>
-  <div id="list-back" class="list back-row"></div>
 </section>
 
 <section id="screen-player" class="screen screen-flush hidden">
@@ -161,9 +158,6 @@ window.addEventListener('unhandledrejection', function (e) {
   <div id="kb-text" class="kb-text kb-empty">Type a search</div>
   <div id="kb-recent" class="kb-recent hidden"></div>
   <div id="kb-grid" class="kb-grid"></div>
-  <div class="list back-row">
-    <button class="focusable back-btn" id="btn-search-back">◀ Back</button>
-  </div>
 </section>
 
 <section id="screen-phone" class="screen hidden">
@@ -178,7 +172,6 @@ window.addEventListener('unhandledrejection', function (e) {
     </ol>
   </div>
   <div class="list back-row">
-    <button class="focusable back-btn" id="btn-phone-back">◀ Back</button>
     <button class="focusable menu-btn" id="btn-pair-new">Link a different phone</button>
   </div>
 </section>
@@ -193,31 +186,31 @@ window.addEventListener('unhandledrejection', function (e) {
     <button class="focusable menu-btn" id="btn-shuffle">Shuffle<small id="shuffle-state">Off</small></button>
     <button class="focusable menu-btn" id="btn-picture">Picture<small id="picture-state">Video</small></button>
     <button class="focusable menu-btn" id="btn-sleep">Sleep timer<small id="sleep-state">Off</small></button>
-  </div>
-  <div class="list back-row">
-    <button class="focusable back-btn" id="btn-settings-back">◀ Back</button>
+    <button class="focusable menu-btn" id="btn-debug">Diagnostics</button>
   </div>
 </section>
 
 <section id="screen-debug" class="screen hidden">
   <h2 class="title">Diagnostics</h2>
+  <div id="input-log" class="input-log hidden"></div>
   <div id="debug-rows" class="debug-rows screen-body"></div>
   <textarea id="debug-log" readonly rows="8"></textarea>
   <div id="debug-copy-msg" class="pair-help"></div>
   <div class="list back-row">
+    <button class="focusable back-btn" id="btn-input-test">Input test</button>
     <button class="focusable back-btn" id="btn-copy-debug">Copy errors</button>
     <button class="focusable back-btn" id="btn-retest">Run self-test</button>
-    <button class="focusable back-btn" id="btn-debug-back">◀ Back</button>
   </div>
 </section>
 
 <div id="toast" class="toast hidden"></div>
 <div id="status" class="status hidden"></div>
+<div id="nav-foot" class="nav-foot hidden" aria-hidden="true">◀ Back</div>
 
 <script src="/sound.js?v=532aca8d"></script>
 <script src="/prefs.js?v=e937b826"></script>
 <script src="/player.js?v=3cd008a3"></script>
-<script src="/app.js?v=cb9fdd90"></script>
+<script src="/app.js?v=e59154ac"></script>
 </div>
 </body>
 </html>

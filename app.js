@@ -79,7 +79,6 @@ const screens = {
 };
 
 let current = 'home';
-let listBack = null;
 let queue = [];
 let queueIndex = -1;
 let pairCode = '';
@@ -308,7 +307,19 @@ function pairKey() {
   return pairLink || pairCode;
 }
 
+/* Screens that Left (or the system Back) leaves. They show the '◀ Back'
+   footer in place of the old focusable Back rows. Search is not one: there
+   Left moves the letter cursor. */
+const FOOT_SCREENS = { list: 1, phone: 1, settings: 1, debug: 1 };
+
 function show(name) {
+  // Home is only ever the root of the nav stack. A plain show('home') from
+  // anywhere (sleep timer, older callers) pops the whole stack instead of
+  // leaving entries that Back would walk into later.
+  if (name === 'home' && !navRendering && navStack.length > 1) {
+    navRoot();
+    return;
+  }
   if (current === 'player' && name !== 'player') {
     progressSave();
     if (typeof Player !== 'undefined') Player.destroy();
@@ -325,8 +336,11 @@ function show(name) {
     bar.classList.add('hidden');
     bar.textContent = '';
   }
+  const foot = $('#nav-foot');
+  if (foot) foot.classList.toggle('hidden', !FOOT_SCREENS[name]);
+  document.body.classList.toggle('has-foot', !!FOOT_SCREENS[name]);
   if (name !== 'player') syncFades();
-  if (name !== 'player') focusFirst();
+  if (name !== 'player') focusDefault();
 }
 
 function focusables() {
@@ -413,6 +427,33 @@ function focusFirst() {
   }
 }
 
+/* Where a screen puts focus when it opens fresh. Lists start on the first
+   video row (Play all stays above it, one Up away). From iPhone starts with
+   nothing focused, so a stray pinch there can never unlink the phone. */
+function focusDefault() {
+  if (current === 'phone') {
+    const a = document.activeElement;
+    if (a && a !== document.body && a.blur) a.blur();
+    return;
+  }
+  if (current === 'list') {
+    const v = screens.list.querySelector('#list-items [data-video]');
+    if (v && v.offsetParent !== null) {
+      v.focus();
+      reveal(v);
+      return;
+    }
+  }
+  focusFirst();
+}
+
+/* The stable identity of a row, so focus survives the list being rebuilt:
+   a video id, a channel id, a home data-menu, or the element id. */
+function focusKeyOf(el) {
+  if (!el || !el.getAttribute) return '';
+  return el.getAttribute('data-key') || el.getAttribute('data-menu') || el.id || '';
+}
+
 function moveFocus(dir) {
   const f = focusables();
   if (!f.length) return;
@@ -425,12 +466,28 @@ function moveFocus(dir) {
   reveal(f[next]);
 }
 
+/* Right in a list: jump n rows, clamped at the ends, never wrapping. */
+function moveFocusBy(n) {
+  const f = focusables();
+  if (!f.length) return;
+  const idx = f.indexOf(document.activeElement);
+  const next = idx < 0 ? 0 : Math.max(0, Math.min(f.length - 1, idx + n));
+  f[next].focus();
+  reveal(f[next]);
+}
+
+/* Pinch feedback: a 120ms press on whatever the pinch landed on. */
+function pulse(el) {
+  if (!el || !el.classList) return;
+  el.classList.add('pressed');
+  clearTimeout(el.pressTimer);
+  el.pressTimer = setTimeout(function () { el.classList.remove('pressed'); }, 120);
+}
+
 function activateFocused() {
   const el = document.activeElement;
   if (!el || !el.classList || !el.classList.contains('focusable')) return;
-  // Pinch feedback: a 120ms press on the row.
-  el.classList.add('pressed');
-  setTimeout(function () { el.classList.remove('pressed'); }, 120);
+  pulse(el);
   el.click();
 }
 
@@ -569,7 +626,13 @@ function renderContinue() {
     return;
   }
   btn.classList.remove('hidden');
-  if (sub) sub.textContent = (p.title || 'Video') + ' · ' + fmtTime(p.t);
+  // Continue carries the queue too, so Home needs no separate Queue row.
+  const n = (p.queue || []).length;
+  if (sub) {
+    sub.textContent = n > 1
+      ? (p.listTitle || 'Queue') + ' · ' + (Math.min(p.queueIndex || 0, n - 1) + 1) + '/' + n + ' · ' + fmtTime(p.t)
+      : (p.title || 'Video') + ' · ' + fmtTime(p.t);
+  }
 }
 
 function openContinue() {
@@ -579,10 +642,10 @@ function openContinue() {
   prefetched = {};
   if (p.queue && p.queue.length) {
     queue = p.queue.map(v => Object.assign({}, v, { _listTitle: p.listTitle || 'Continue' }));
-    openPlayer(Math.min(p.queueIndex || 0, queue.length - 1), true, p.t);
+    navPlayer(Math.min(p.queueIndex || 0, queue.length - 1), p.t);
   } else {
     queue = [Object.assign({}, p, { _listTitle: 'Continue' })];
-    openPlayer(0, true, p.t);
+    navPlayer(0, p.t);
   }
 }
 
@@ -667,26 +730,219 @@ function renderHome() {
   if (lib) lib.classList.toggle('hidden', !ytSession);
   const sub = document.querySelector('[data-menu="library"] small');
   if (sub) sub.textContent = 'Subscriptions, playlists, liked';
-  const q = document.querySelector('[data-menu="queue"]');
-  if (q) q.classList.toggle('hidden', queue.length < 2);
-  const qs = document.querySelector('[data-menu="queue"] small');
-  if (qs && queue.length > 1) qs.textContent = queue.length + ' videos · ' + queueTitle();
 }
 
+/* ---- Navigation stack ----------------------------------------------------
+
+   Every forward move is navTo(entry) and every Back pops, so Back returns to
+   exactly the screen, row and scroll position the wearer left. An entry is
+   { name, render, focusKey, focusIdx, scrollTop } and redraws itself from
+   data it already holds, so going back never refetches. Home is depth 0.
+
+   Browser history mirrors the stack: the root is seeded with replaceState and
+   each level gets one pushState, at most HIST_MAX of them (the glasses cap
+   history at 5 entries including the root). On firmware v125.1+ the
+   middle-finger tap is history.back(), which arrives here as popstate - the
+   same path ArrowLeft takes. Every navigation bumps navGen, and async loads
+   drop their result when it moved, so a feed the wearer backed out of never
+   takes over the screen later. */
+const HIST_MAX = 4;
+const homeEntry = { name: 'home', render: function () { renderHome(); show('home'); } };
+let navStack = [homeEntry];
+let navGen = 0;
+let navRendering = false;
+let navAfterRoot = null;
+
+function navTop() { return navStack[navStack.length - 1]; }
+function navDepth() { return navStack.length - 1; }
+
+function histDepth() {
+  const s = history.state;
+  return s && s.gt ? (Number(s.d) || 0) : 0;
+}
+
+/* Remember where focus and scroll sit on the top entry before leaving it. */
+function navSave() {
+  const top = navTop();
+  if (!top || top.name !== current || current === 'player') return;
+  const f = focusables();
+  const el = document.activeElement;
+  const i = f.indexOf(el);
+  top.focusKey = i >= 0 ? focusKeyOf(el) : '';
+  top.focusIdx = i;
+  const body = screens[current] && screens[current].querySelector('.screen-body');
+  top.scrollTop = body ? body.scrollTop : 0;
+}
+
+function navRender(entry, restore) {
+  navRendering = true;
+  try { entry.render(entry); } finally { navRendering = false; }
+  if (restore) navRestore(entry);
+}
+
+/* Focus by key, then by index, else the screen's own default (the first video
+   row in a list, nothing on From iPhone). */
+function navRestore(entry) {
+  if (current === 'player' || current !== entry.name) return;
+  const f = focusables();
+  let el = null;
+  if (entry.focusKey) el = f.filter(x => focusKeyOf(x) === entry.focusKey)[0] || null;
+  if (!el && entry.focusIdx >= 0 && f.length) el = f[Math.min(entry.focusIdx, f.length - 1)];
+  if (!el) return;
+  const body = screens[current] && screens[current].querySelector('.screen-body');
+  if (body && entry.scrollTop) body.scrollTop = entry.scrollTop;
+  el.focus({ preventScroll: true });
+  reveal(el);
+}
+
+/* After a push or a replace, make the current history entry say this depth.
+   pushState only when history is exactly one level short; if it is already at
+   or past this depth (an entry was dropped without moving history), replace. */
+function navHistory() {
+  const d = navDepth();
+  const h = histDepth();
+  try {
+    if (h >= d) history.replaceState({ gt: 1, d: d }, '');
+    else if (d <= HIST_MAX) history.pushState({ gt: 1, d: d }, '');
+  } catch (e) { /* history is a nicety; ArrowLeft still pops the stack */ }
+}
+
+/* opts.replace swaps the top entry instead of stacking a new one (channel
+   pages, a new push replacing an older one). Home is never replaced. */
+function navTo(entry, opts) {
+  const replace = !!(opts && opts.replace) && navStack.length > 1;
+  navSave();
+  navGen++;
+  feedWait = '';
+  if (replace) navStack[navStack.length - 1] = entry;
+  else navStack.push(entry);
+  navHistory();
+  navRender(entry, false);
+}
+
+/* Redraw the top entry in place (new data arrived) and keep the wearer's row. */
+function navRefresh() {
+  navSave();
+  navRender(navTop(), true);
+}
+
+function navPopTo(target) {
+  target = Math.max(0, Math.min(target, navDepth()));
+  const played = current === 'player' && nowPlaying ? nowPlaying.id : '';
+  navGen++;
+  feedWait = '';
+  navStack.length = target + 1;
+  const top = navTop();
+  // Leaving the player lands on the row of the video that was playing, even
+  // when the queue moved on from the one that was picked.
+  if (played && top.videos && top.videos.some(v => v && v.id === played)) {
+    top.focusKey = played;
+    top.focusIdx = -1;
+  }
+  navRender(top, true);
+  if (target === 0) navRunAfterRoot();
+}
+
+function homePulse() {
+  pulse(document.querySelector('#screen-home .title-home'));
+}
+
+/* ArrowLeft and the back keys. Left on Home does nothing but a short pulse on
+   the title, so repeated Lefts always settle on Home with focus kept. */
 function goBack() {
-  if (current === 'list' && listBack) { listBack(); return; }
-  if (current === 'player') {
-    progressSave();
-    if (typeof Player !== 'undefined') Player.destroy();
-    nowPlaying = null;
-    if (queue.length && queueTitle() !== 'From iPhone' && queueTitle() !== 'From phone') {
-      showVideoList(queueTitle(), queue, listBack || (() => show('home')));
-      return;
-    }
-    show('home');
+  const depth = navDepth();
+  if (depth <= 0) {
+    if (current !== 'home') navRender(homeEntry, true);
+    homePulse();
     return;
   }
-  if (current !== 'home') show('home');
+  navGen++;
+  feedWait = '';
+  if (histDepth() === depth) {
+    try { history.back(); return; } catch (e) { /* pop by hand below */ }
+  }
+  navPopTo(depth - 1);
+  try { history.replaceState({ gt: 1, d: Math.min(navDepth(), histDepth()) }, ''); } catch (e) {}
+}
+
+function navRunAfterRoot() {
+  const f = navAfterRoot;
+  navAfterRoot = null;
+  if (f) f();
+}
+
+/* Straight back to Home, history included. `after` runs once history is at
+   the root - WP1's update reload must wait for that (a reload at depth > 0
+   would leave stale same-page entries behind the new page). */
+function navRoot(after) {
+  const h = histDepth();
+  if (navStack.length > 1 || current !== 'home') {
+    navSave();
+    navGen++;
+    feedWait = '';
+    navStack.length = 1;
+    navRender(homeEntry, true);
+  }
+  if (h > 0) {
+    navAfterRoot = after || null;
+    try {
+      history.go(-h);
+      if (after) setTimeout(navRunAfterRoot, 800);
+      return;
+    } catch (e) { navAfterRoot = null; }
+  }
+  if (after) after();
+}
+
+window.addEventListener('popstate', function (e) {
+  inputTestNote('popstate');
+  const s = e.state;
+  const depth = navDepth();
+  let target = s && s.gt ? (Number(s.d) || 0) : 0;
+  // Never pushState in here. A popstate that does not go below the current
+  // depth (history got ahead of the stack) still counts as one Back.
+  if (target >= depth) {
+    if (depth === 0) { navRunAfterRoot(); return; }
+    target = depth - 1;
+    try { history.replaceState({ gt: 1, d: target }, ''); } catch (x) {}
+  }
+  navPopTo(target);
+});
+
+function navPlayer(index, startAt) {
+  navTo({ name: 'player', render: function () { openPlayer(index, true, startAt); } });
+}
+
+function navVideoList(title, videos, kind, opts) {
+  navTo({
+    name: 'list', kind: kind || '', videos: videos,
+    render: function () { showVideoList(title, videos, kind); },
+  }, opts);
+}
+
+/* While a picked row's feed loads it shows a spinner and 'Loading…'. A row
+   that is already loading ignores a second pinch. */
+function rowLoading(key) {
+  if (current !== 'list' || !key) return null;
+  const rows = [].slice.call(document.querySelectorAll('#list-items [data-key]'));
+  const row = rows.filter(r => r.getAttribute('data-key') === key)[0];
+  if (!row) return null;
+  if (!row.classList.contains('is-loading')) {
+    row.classList.add('is-loading');
+    const copy = row.querySelector('.list-copy') || row;
+    const tag = document.createElement('span');
+    tag.className = 'row-load';
+    tag.innerHTML = '<span class="row-spin"></span>Loading…';
+    copy.appendChild(tag);
+  }
+  return row;
+}
+
+function rowLoaded(row) {
+  if (!row) return;
+  row.classList.remove('is-loading');
+  const tag = row.querySelector('.row-load');
+  if (tag) tag.remove();
 }
 
 function queueTitle() {
@@ -695,9 +951,12 @@ function queueTitle() {
     : 'Videos';
 }
 
-function renderList(title, items, emptyText, onBack, backLabel, kind) {
+/* Back is ArrowLeft or the system Back (the nav stack), so lists carry no
+   Back row. An empty list can offer one action row instead, which then has
+   focus. Item fields used here: key (stable id for focus restore), video
+   (a video row: default focus), count (counts toward the n/N in the title). */
+function renderList(title, items, emptyText, kind, emptyAction) {
   listKind = kind || '';
-  listBack = onBack || (() => show('home'));
   $('#list-title').textContent = title;
   const box = $('#list-items');
   box.innerHTML = '';
@@ -714,11 +973,16 @@ function renderList(title, items, emptyText, onBack, backLabel, kind) {
     }
     p.appendChild(document.createTextNode(text));
     box.appendChild(p);
-  } else {
+    if (emptyAction) items = [Object.assign({ key: 'empty-action' }, emptyAction)];
+  }
+  if (items.length) {
     items.slice(0, MAX_LIST).forEach(item => {
       const btn = document.createElement('button');
       btn.className = 'focusable list-btn' + (item.thumb ? ' has-shot' : '') +
         (item.cls ? ' ' + item.cls : '');
+      if (item.key) btn.setAttribute('data-key', item.key);
+      if (item.video) btn.setAttribute('data-video', '1');
+      if (item.count) btn.setAttribute('data-count', '1');
       if (item.thumb) {
         const shot = document.createElement('span');
         shot.className = 'list-shot';
@@ -752,14 +1016,24 @@ function renderList(title, items, emptyText, onBack, backLabel, kind) {
     });
     if (box.firstElementChild) thumbsNear(box.firstElementChild);
   }
-  const back = $('#list-back');
-  back.innerHTML = '';
-  const b = document.createElement('button');
-  b.className = 'focusable back-btn';
-  b.textContent = '◀ ' + (backLabel || 'Back');
-  b.addEventListener('click', listBack);
-  back.appendChild(b);
   show('list');
+  listCount();
+}
+
+/* 'n/N' to the right of the list title: the focused row among the counted
+   rows (videos, channels, playlists; not Play all or paging rows). */
+function listCount() {
+  const el = $('#list-count');
+  if (!el) return;
+  const rows = [].slice.call(document.querySelectorAll('#list-items [data-count]'));
+  if (rows.length < 2) { el.textContent = ''; return; }
+  const i = rows.indexOf(document.activeElement);
+  el.textContent = (i >= 0 ? (i + 1) + '/' : '') + rows.length;
+}
+
+{
+  const listBox = $('#list-items');
+  if (listBox) listBox.addEventListener('focusin', listCount);
 }
 
 function videoItems(videos, onPick) {
@@ -773,6 +1047,9 @@ function videoItems(videos, onPick) {
     const seen = markLabel(v.id);
     if (seen) bits.push(seen);
     return {
+      key: v.id,
+      video: true,
+      count: true,
       label: v.title || 'YouTube video',
       sub: bits.join(' · '),
       thumb: v.thumb,
@@ -782,25 +1059,32 @@ function videoItems(videos, onPick) {
   });
 }
 
-function showVideoList(title, videos, onBack, kind) {
-  skipIds = {};
-  prefetched = {};
-  queue = videos.map(v => Object.assign({}, v, { _listTitle: title }));
+/* Showing a list never touches the queue. Only starting a video from it does,
+   so browsing can never replace what is playing. */
+function showVideoList(title, videos, kind) {
   const items = [];
   if (videos.length > 1) {
     items.push({
+      key: 'play-all',
       label: 'Play all · ' + videos.length,
       cls: 'is-action',
-      onPick: () => {
-        queue = maybeShuffle(queue);
-        openPlayer(0, true, resumeAt(queue[0] && queue[0].id));
-      },
+      onPick: () => playFromList(title, videos, 0, true),
     });
   }
-  items.push.apply(items, videoItems(videos, function (i, v) {
-    openPlayer(i, true, resumeAt(v.id));
+  items.push.apply(items, videoItems(videos, function (i) {
+    playFromList(title, videos, i, false);
   }));
-  renderList(title, items, 'No videos in this list.', onBack || (() => show('home')), 'Back', kind);
+  renderList(title, items, 'No videos in this list.', kind);
+}
+
+function playFromList(title, videos, index, all) {
+  skipIds = {};
+  prefetched = {};
+  queue = videos.map(v => Object.assign({}, v, { _listTitle: title }));
+  if (all) queue = maybeShuffle(queue);
+  const v = queue[index];
+  if (!v) return;
+  navPlayer(index, resumeAt(v.id));
 }
 
 function setLoading(on, title, text) {
@@ -1110,7 +1394,7 @@ function applyPush(dest) {
   }
   if (dest.kind === 'channels') {
     channelsSave(dest.channels || []);
-    if (listKind === 'channels' && current === 'list') openChannels(channelPage);
+    if (listKind === 'channels' && current === 'list') navRefresh();
     if (current !== 'player') setStatus('Channels updated from your phone.');
     return;
   }
@@ -1133,6 +1417,10 @@ function applyPush(dest) {
     });
   }
   const ordered = maybeShuffle(list);
+  // The pushed list goes on the nav stack under the player, so Back lands on
+  // it with the played row focused. Navigate before replacing the queue:
+  // leaving a playing video saves its progress against its own queue.
+  navPushList(name, ordered);
   queue = ordered.map(v => Object.assign({}, v, { _listTitle: name }));
   playlistRemember(name, list);
   diagSend('push', {
@@ -1141,10 +1429,18 @@ function applyPush(dest) {
     hasR: !!(queue[0] && queue[0].r),
     origin: String(window.location.origin || ''),
   });
-  openPlayer(0, true, resumeAt(queue[0] && queue[0].id));
+  navPlayer(0, resumeAt(queue[0] && queue[0].id));
   setStatus(list.length > 1
     ? 'Playing ' + name + ' · ' + list.length + ' videos.'
     : 'Playing from your phone.');
+}
+
+/* A push replaces what is playing rather than stacking on it: the player on
+   top (and an older pushed list under it) are swapped out, so a second push
+   never makes Back walk through the first one. */
+function navPushList(title, videos) {
+  if (navStack.length > 1 && navTop().name === 'player') navStack.pop();
+  navVideoList(title, videos, 'push', { replace: navTop().kind === 'push' });
 }
 
 /* The phone's LAN relay is plain HTTP and the HUD is HTTPS, so it can never be
@@ -1253,73 +1549,90 @@ function hideRelayOffer() {
 
 function openRecents() {
   const list = recentsLoad();
-  if (!list.length) {
-    renderList('Recents', [], 'Nothing played yet. Open Channels, or send a link from your phone.', () => show('home'));
-    return;
-  }
-  showVideoList('Recents', list, () => show('home'));
+  navTo({
+    name: 'list', kind: 'recents', videos: list,
+    render: function () {
+      if (!list.length) {
+        renderList('Recents', [], 'Nothing played yet. Send a link from your iPhone, or pick a channel.',
+          'recents', { label: 'Open Channels', onPick: () => openChannels() });
+        return;
+      }
+      showVideoList('Recents', list, 'recents');
+    },
+  });
 }
 
+/* A saved playlist opens its contents (Play all plus the rows), the same as a
+   channel does, instead of starting to play on the pinch. */
 function openPlaylists() {
   const lists = playlistsLoad();
-  renderList('Playlists', lists.map(p => ({
-    label: p.name,
-    sub: (p.videos || []).length + ' videos',
-    onPick: () => {
-      skipIds = {};
-      prefetched = {};
-      const vids = maybeShuffle(p.videos || []);
-      queue = vids.map(v => Object.assign({}, v, { _listTitle: p.name }));
-      if (!queue.length) return;
-      openPlayer(0, true);
+  navTo({
+    name: 'list', kind: 'playlists',
+    render: function () {
+      renderList('Playlists', lists.map(p => ({
+        key: 'pl:' + p.name,
+        count: true,
+        label: p.name,
+        sub: (p.videos || []).length + ' videos',
+        onPick: () => navVideoList(p.name, p.videos || [], 'playlist'),
+      })), 'Send a playlist from your iPhone. It stays here after that.', 'playlists',
+      { label: 'Pair your iPhone', sub: 'Then send a playlist from the app', onPick: () => openPhone() });
     },
-  })), 'Send a playlist from your iPhone. It stays here after that.', () => show('home'));
+  });
 }
 
-function openChannels(page) {
+/* Channel pages replace the current entry: Back from page 2 goes where the
+   wearer was before Channels, not to page 1. */
+function openChannels(page, replace) {
+  const p = Math.max(0, Number(page) || 0);
+  navTo({ name: 'list', kind: 'channels', render: function () { renderChannels(p); } },
+    { replace: !!replace });
+}
+
+function renderChannels(page) {
   channelPage = Math.max(0, Number(page) || 0);
   const all = channelsLoad();
   const start = channelPage * CHANNEL_PAGE;
   const slice = all.slice(start, start + CHANNEL_PAGE);
   const items = slice.map(ch => ({
+    key: ch.id,
+    count: true,
     label: ch.name,
     onPick: () => loadChannel(ch),
   }));
   if (start + CHANNEL_PAGE < all.length) {
     items.push({
+      key: 'more-channels',
       label: 'More channels',
       sub: (all.length - start - CHANNEL_PAGE) + ' more',
-      onPick: () => openChannels(channelPage + 1),
+      onPick: () => openChannels(channelPage + 1, true),
     });
   } else if (channelPage > 0) {
     items.push({
+      key: 'first-page',
       label: 'First page',
       sub: all.length + ' channels',
-      onPick: () => openChannels(0),
+      onPick: () => openChannels(0, true),
     });
   }
-  renderList(
-    'Channels',
-    items,
-    'Add channels on your iPhone. They show up here.',
-    () => {
-      if (channelPage > 0) openChannels(channelPage - 1);
-      else show('home');
-    },
-    channelPage > 0 ? 'Previous' : 'Back',
-    'channels'
-  );
+  renderList('Channels', items, 'Add channels on your iPhone. They show up here.', 'channels');
 }
 
-function loadChannel(ch, onBack) {
+/* The picked row spins while the feed loads; the video list opens only if
+   the wearer is still where they picked it (navGen unchanged). */
+function loadChannel(ch) {
+  if (feedWait === ch.id) return;
   feedWait = ch.id;
-  setStatus('Loading ' + ch.name + '...');
+  const gen = navGen;
+  const row = rowLoading(ch.id);
+  if (!row) setStatus('Loading ' + ch.name + '...');
+  function stale() { return feedWait !== ch.id || gen !== navGen; }
   function attempt() {
-    if (feedWait !== ch.id) return;
+    if (stale()) return;
     fetch('/api/feed?channel=' + encodeURIComponent(ch.id))
       .then(r => r.json())
       .then(d => {
-        if (feedWait !== ch.id) return;
+        if (stale()) return;
         if (!d.ok) {
           feedHealth = d.error || 'feed failed';
           if (isNetErr(d.error)) {
@@ -1327,6 +1640,8 @@ function loadChannel(ch, onBack) {
             setTimeout(attempt, RETRY_MS);
             return;
           }
+          feedWait = '';
+          rowLoaded(row);
           setStatus(d.error || 'Could not load that channel.', true);
           return;
         }
@@ -1339,9 +1654,10 @@ function loadChannel(ch, onBack) {
           thumb: v.thumb,
           duration: v.duration || '',
         }));
-        showVideoList(ch.name, videos, onBack || (() => openChannels(channelPage)));
+        navVideoList(ch.name, videos, 'channel');
       })
       .catch(e => {
+        if (stale()) return;
         feedHealth = String((e && e.message) || e);
         setOffline(true);
         setTimeout(attempt, RETRY_MS);
@@ -1433,7 +1749,7 @@ function pressKey() {
   if (keyRow === grid.length - 1) {
     const action = KEY_ACTIONS[keyCol];
     if (!action) return;
-    if (action.act === 'back') { show('home'); return; }
+    if (action.act === 'back') { goBack(); return; }
     if (action.act === 'del') typed = typed.slice(0, -1);
     if (action.act === 'clear') typed = '';
     if (action.act === 'go') { runSearch(); return; }
@@ -1444,37 +1760,47 @@ function pressKey() {
   renderSearch();
 }
 
+/* Opening Search from Home starts empty. Coming back to it from results is a
+   nav-stack pop, which redraws it without clearing what was typed. */
 function openSearch() {
   typed = '';
   keyRow = 0;
   keyCol = 0;
-  show('search');
-  renderSearch();
+  navTo({ name: 'search', render: function () { show('search'); renderSearch(); } });
 }
 
+/* Results open as their own entry right away ('Searching...'), and fill in
+   only if the wearer has not navigated since (navGen). */
 function runSearch() {
   const q = typed.trim();
   if (!q) return;
   lastQuery = q;
   queriesAdd(q);
-  setStatus('Searching ' + q + '...');
-  renderList('Search', [], 'Searching...', () => openSearch(), 'Back', 'search');
+  const entry = {
+    name: 'list', kind: 'search', videos: null, empty: 'Searching...',
+    render: function () {
+      if (entry.videos && entry.videos.length) showVideoList('Search: ' + q, entry.videos, 'search');
+      else renderList(entry.videos ? 'Search: ' + q : 'Search', [], entry.empty, 'search');
+    },
+  };
+  navTo(entry);
+  const gen = navGen;
   fetch('/api/search?q=' + encodeURIComponent(q) + '&limit=20')
     .then(r => r.json())
     .then(d => {
-      if (!d.ok || !(d.videos || []).length) {
-        setStatus('');
-        renderList('Search: ' + q, [],
-          d.error || 'Nothing found for that.', () => openSearch(), 'Back', 'search');
-        return;
-      }
+      if (gen !== navGen) return;
       setStatus('');
-      setOffline(false);
-      showVideoList('Search: ' + q, d.videos, () => openSearch(), 'search');
+      if (d.ok && (d.videos || []).length) setOffline(false);
+      entry.videos = d.ok ? (d.videos || []) : [];
+      entry.empty = d.error || 'Nothing found for that.';
+      navRender(entry, false);
     })
     .catch(e => {
+      if (gen !== navGen) return;
       setOffline(true);
-      renderList('Search: ' + q, [], netText(e), () => openSearch(), 'Back', 'search');
+      entry.videos = [];
+      entry.empty = netText(e);
+      navRender(entry, false);
     });
 }
 
@@ -1504,20 +1830,41 @@ function libraryFetch() {
     });
 }
 
+/* Library is one nav entry that redraws itself as the fetch lands, but only
+   while the wearer is still on it (navGen). A failure offers 'Try again'. */
 function openLibrary() {
-  if (!ytSession) {
-    renderList('Library', [],
-      'Tap "Send sign-in to glasses" in the iPhone app first.', () => show('home'));
-    return;
-  }
-  if (library) {
-    renderLibrary();
-    return;
-  }
-  renderList('Library', [], 'Loading your YouTube...', () => show('home'));
-  libraryFetch().then(renderLibrary).catch(e => {
+  const entry = {
+    name: 'list', kind: 'library',
+    render: function () {
+      if (!ytSession) {
+        renderList('Library', [],
+          'Tap "Send sign-in to glasses" in the iPhone app first.', 'library');
+        return;
+      }
+      if (library) { renderLibrary(); return; }
+      if (libraryErr) {
+        renderList('Library', [], libraryErr, 'library', {
+          label: 'Try again',
+          onPick: () => { libraryErr = ''; libraryLoad(entry); },
+        });
+        return;
+      }
+      renderList('Library', [], 'Loading your YouTube...', 'library');
+    },
+  };
+  libraryErr = '';
+  navTo(entry);
+  if (ytSession && !library) libraryLoad(entry);
+}
+
+function libraryLoad(entry) {
+  const gen = navGen;
+  if (current === 'list' && navTop() === entry) navRender(entry, false);
+  libraryFetch().then(function () {
+    if (gen === navGen) navRender(entry, false);
+  }).catch(e => {
     libraryErr = String((e && e.message) || e);
-    renderList('Library', [], libraryErr, () => show('home'));
+    if (gen === navGen) navRender(entry, false);
   });
 }
 
@@ -1526,20 +1873,26 @@ function renderLibrary() {
   const items = [];
   if ((d.watchLater || []).length) {
     items.push({
+      key: 'lib:wl',
+      count: true,
       label: 'Watch later',
       sub: d.watchLater.length + ' videos',
-      onPick: () => showVideoList('Watch later', d.watchLater, openLibrary),
+      onPick: () => navVideoList('Watch later', d.watchLater, 'libvideos'),
     });
   }
   if ((d.likes || []).length) {
     items.push({
+      key: 'lib:likes',
+      count: true,
       label: 'Liked videos',
       sub: d.likes.length + ' videos',
-      onPick: () => showVideoList('Liked videos', d.likes, openLibrary),
+      onPick: () => navVideoList('Liked videos', d.likes, 'libvideos'),
     });
   }
   (d.playlists || []).slice(0, 20).forEach(p => {
     items.push({
+      key: 'lib:' + p.id,
+      count: true,
       label: p.name,
       sub: p.count + ' videos',
       onPick: () => openLibraryPlaylist(p),
@@ -1547,55 +1900,60 @@ function renderLibrary() {
   });
   if ((d.subscriptions || []).length) {
     items.push({
+      key: 'lib:subs',
+      count: true,
       label: 'Subscriptions',
       sub: d.subscriptions.length + ' channels',
       onPick: () => openSubs(),
     });
   }
   renderList('Library', items,
-    libraryErr || 'Nothing in your YouTube library yet.', () => show('home'), 'Back', 'library');
+    libraryErr || 'Nothing in your YouTube library yet.', 'library');
 }
 
 function openLibraryPlaylist(p) {
-  renderList(p.name, [], 'Loading...', openLibrary);
+  const entry = {
+    name: 'list', kind: 'libplaylist', videos: null, empty: 'Loading...',
+    render: function () {
+      if (entry.videos && entry.videos.length) showVideoList(p.name, entry.videos, 'libplaylist');
+      else renderList(p.name, [], entry.empty, 'libplaylist');
+    },
+  };
+  navTo(entry);
+  const gen = navGen;
   authFetch('/api/yt/playlist?id=' + encodeURIComponent(p.id))
     .then(d => {
-      if (!d.ok || !(d.videos || []).length) {
-        renderList(p.name, [], d.error || 'That playlist is empty.', openLibrary);
-        return;
-      }
-      showVideoList(p.name, d.videos, openLibrary);
+      if (gen !== navGen) return;
+      entry.videos = d.ok ? (d.videos || []) : [];
+      entry.empty = d.error || 'That playlist is empty.';
+      navRender(entry, false);
     })
-    .catch(e => renderList(p.name, [], netText(e), openLibrary));
+    .catch(e => {
+      if (gen !== navGen) return;
+      entry.videos = [];
+      entry.empty = netText(e);
+      navRender(entry, false);
+    });
 }
 
 function openSubs() {
   const subs = (library && library.subscriptions) || [];
-  renderList('Subscriptions', subs.map(ch => ({
-    label: ch.name,
-    thumb: ch.thumb || '',
-    onPick: () => loadChannel({ id: ch.id, name: ch.name }, openSubs),
-  })), 'No subscriptions found.', openLibrary, 'Back', 'subs');
-}
-
-/* ---- Queue -------------------------------------------------------------- */
-
-function openQueue() {
-  if (queue.length < 2) {
-    setStatus('Nothing queued.');
-    return;
-  }
-  const items = videoItems(queue, function (i) {
-    openPlayer(i, true, resumeAt(queue[i] && queue[i].id));
-  }).map((it, i) => Object.assign({}, it, {
-    label: (i === queueIndex ? '▶ ' : '') + it.label,
-  }));
-  renderList(queueTitle() + ' · queue', items, 'Nothing queued.',
-    () => show('home'), 'Back', 'queue');
+  navTo({
+    name: 'list', kind: 'subs',
+    render: function () {
+      renderList('Subscriptions', subs.map(ch => ({
+        key: ch.id,
+        count: true,
+        label: ch.name,
+        thumb: ch.thumb || '',
+        onPick: () => loadChannel({ id: ch.id, name: ch.name }),
+      })), 'No subscriptions found.', 'subs');
+    },
+  });
 }
 
 function openPhone() {
-  show('phone');
+  navTo({ name: 'phone', render: function () { show('phone'); } });
   pairCode = pairCodeStored();
   pairLink = linkStored();
   if (pairKey()) {
@@ -1931,7 +2289,7 @@ function pushIsFresh() {
 
 /* Idle path: after each poll and every UPDATE_CHECK_MS. */
 function maybeUpdate() {
-  if (!updateAllowed() || document.hidden || current !== 'home') return false;
+  if (!updateAllowed() || document.hidden || current !== 'home' || navDepth() > 0) return false;
   if (Date.now() - lastKeyAt < UPDATE_IDLE_MS || pushIsFresh()) return false;
   reloadForUpdate(updatePending);
   return true;
@@ -1942,12 +2300,19 @@ function maybeUpdate() {
 function resumeUpdate() {
   if (!updateAllowed() || document.hidden) return false;
   if (current === 'player' || searchTextTyped() || pushIsFresh()) return false;
-  if (current !== 'home') show('home');
   reloadForUpdate(updatePending);
   return true;
 }
 
+/* Reloads only from the root of the nav stack (WP3). Deeper than Home, it
+   first walks history back to depth 0 (navRoot), then reloads on the root
+   popstate, so the reloaded page does not start with stale history entries
+   that Back would walk into. */
 function reloadForUpdate(build) {
+  if (navDepth() > 0 || current !== 'home') {
+    navRoot(function () { reloadForUpdate(build); });
+    return;
+  }
   try { progressSave(); } catch (e) { /* best effort */ }
   try { sessionStorage.setItem(UPDATED_FROM_KEY, String(window.GLASSTUBE_BUILD || '?')); }
   catch (e) { /* optional */ }
@@ -2024,6 +2389,8 @@ function debugLines() {
   out.push(['Recents', String(recentsLoad().length)]);
   out.push(['Saved playlists', String(playlistsLoad().length)]);
   out.push(['Resume marks', String(Object.keys(marksLoad()).length)]);
+  out.push(['Input filter', 'dup ' + inputStats.dup + ' · enter-lock ' + inputStats.enterLock +
+    ' · repeat ' + inputStats.repeat + ' · unknown ' + inputStats.unknown]);
   out.push(['JS errors', errs.length ? errs[errs.length - 1] : 'none', !errs.length]);
   out.push(['Playback fails', playFails.length ? playFails[0] : 'none', !playFails.length]);
   if (playFails.length > 1) out.push(['Earlier fail', playFails[1], false]);
@@ -2143,7 +2510,7 @@ function handleSearchKey(e) {
   const key = e.key;
   if (isBackKey(key)) {
     e.preventDefault();
-    show('home');
+    goBack();
     return;
   }
   if (key === DPAD.UP) { e.preventDefault(); moveKey(-1, 0); return; }
@@ -2160,32 +2527,247 @@ function handleSearchKey(e) {
   }
 }
 
+/* ---- Input arbiter -----------------------------------------------------
+
+   Every key the Neural Band (or a keyboard, or the harness) sends goes
+   through here once, in the capture phase, before anything else sees it.
+   resolveKey turns it into one gesture name without guessing: e.key, then
+   e.code, then a single printable e.key as { char } (Search types with it),
+   then the DOM keyCodes 37-40/13 and the Android keycodes 19-22, 23 and 66.
+   Anything else is ignored. Then two filters keep one physical gesture from
+   doing two things: the same gesture inside DUP_MS is one
+   gesture, and Enter inside ENTER_LOCK_MS of a swipe is a side effect of
+   the swipe, not a pinch. Held Enter (repeat) never fires again. Do not
+   filter on isTrusted: the harness and selftest dispatch synthetic keys. */
+const INPUT = {
+  DUP_MS: 120,
+  ENTER_LOCK_MS: 320,
+};
+const INPUT_KEYS = {
+  ArrowUp: 'up', Up: 'up', ArrowDown: 'down', Down: 'down',
+  ArrowLeft: 'left', Left: 'left', ArrowRight: 'right', Right: 'right',
+  Enter: 'enter', NumpadEnter: 'enter', Select: 'enter',
+  Escape: 'back', Esc: 'back', Backspace: 'back', BrowserBack: 'back', GoBack: 'back',
+};
+const INPUT_CODES = {
+  37: 'left', 38: 'up', 39: 'right', 40: 'down', 13: 'enter',
+  19: 'up', 20: 'down', 21: 'left', 22: 'right', 23: 'enter', 66: 'enter',
+};
+/* What each gesture looks like to the per-screen handlers, which still read
+   e.key (the player mapping belongs to WP7 and is not changed here). */
+const INPUT_AS_KEY = {
+  up: DPAD.UP, down: DPAD.DOWN, left: DPAD.LEFT, right: DPAD.RIGHT,
+  enter: DPAD.SELECT, back: 'Escape',
+};
+const inputStats = { dup: 0, enterLock: 0, repeat: 0, unknown: 0 };
+let inputLast = '';
+let inputLastAt = 0;
+let inputArrowAt = 0;
+
+function resolveKey(e) {
+  if (!e) return null;
+  const k = e.key;
+  if (k && INPUT_KEYS[k]) return { name: INPUT_KEYS[k] };
+  if (e.code && INPUT_KEYS[e.code]) return { name: INPUT_KEYS[e.code] };
+  // A printable e.key wins over the keyCode tables: DOM keyCode 66 is 'b',
+  // which the Android table would otherwise read as Enter.
+  if (k && k.length === 1) {
+    return (e.ctrlKey || e.metaKey || e.altKey) ? null : { char: k };
+  }
+  const kc = Number(e.keyCode || e.which || 0);
+  if (INPUT_CODES[kc]) return { name: INPUT_CODES[kc] };
+  return null;
+}
+
+/* The gesture the screen sees: a small event-shaped object, so handlers that
+   read e.key work the same for Android keycodes and for real arrow keys. */
+function inputEvent(e, r) {
+  return {
+    key: r.char || INPUT_AS_KEY[r.name],
+    code: e.code || '',
+    repeat: !!e.repeat,
+    gesture: r.name || 'char',
+    preventDefault: function () { e.preventDefault(); },
+  };
+}
+
 document.addEventListener('keydown', function (e) {
+  inputTestNote('keydown', e);
+  // Any key is activity (WP1): it keeps the fast poll cadence and holds off
+  // an update reload, even a key the arbiter then ignores.
+  lastKeyAt = Date.now();
+  lastActiveAt = lastKeyAt;
+  pollSoonerIfIdle();
+  const r = resolveKey(e);
+  if (!r) { inputStats.unknown++; return; }
+  e.preventDefault();
+  const now = Date.now();
+  // Any resolved gesture is a user activation: let WP5's player unlock audio
+  // on it synchronously, inside the gesture.
+  if (typeof Player !== 'undefined' && typeof Player.unlock === 'function') {
+    try { Player.unlock(); } catch (x) { /* unlock is best effort */ }
+  }
+  if (inputTest && current === 'debug') return;
+  const name = r.name || ('char:' + r.char);
+  if (r.name === 'enter' && e.repeat) { inputStats.repeat++; return; }
+  if (!r.char && name === inputLast && now - inputLastAt < INPUT.DUP_MS) {
+    inputStats.dup++;
+    inputLastAt = now;
+    return;
+  }
+  if (r.name === 'enter' && now - inputArrowAt < INPUT.ENTER_LOCK_MS) {
+    inputStats.enterLock++;
+    return;
+  }
+  inputLast = name;
+  inputLastAt = now;
+  if (r.name === 'up' || r.name === 'down' || r.name === 'left' || r.name === 'right') {
+    inputArrowAt = now;
+  }
+  inputDispatch(inputEvent(e, r));
+}, true);
+
+document.addEventListener('keyup', function (e) {
+  inputTestNote('keyup', e);
+}, true);
+
+/* One place decides who gets the gesture: the player (its own mapping, WP7
+   adds the player menu inside it), Search (typing and the letter grid), or
+   the list screens. */
+function inputDispatch(ev) {
   if (current === 'player') {
-    handlePlayerKey(e);
+    handlePlayerKey(ev);
     return;
   }
   if (current === 'search') {
-    handleSearchKey(e);
+    handleSearchKey(ev);
     return;
   }
-  const key = e.key;
-  if (isBackKey(key)) {
-    e.preventDefault();
+  handleDefaultKey(ev);
+}
+
+function handleDefaultKey(ev) {
+  const g = ev.gesture;
+  if (g === 'back' || g === 'left') {
+    // Left on Home is a no-op apart from a short pulse on the title.
     goBack();
     return;
   }
-  if (key === DPAD.LEFT) {
-    e.preventDefault();
-    if (current === 'home') moveFocus('up');
-    else goBack();
+  if (g === 'up') { moveFocus('up'); return; }
+  if (g === 'down') { moveFocus('down'); return; }
+  if (g === 'right') {
+    if (current === 'list') { moveFocusBy(4); return; }
+    if (current === 'settings' && settingsCycles(document.activeElement)) {
+      activateFocused();
+      return;
+    }
+    moveFocus('down');
     return;
   }
-  if (key === DPAD.UP) { e.preventDefault(); moveFocus('up'); return; }
-  if (key === DPAD.DOWN) { e.preventDefault(); moveFocus('down'); return; }
-  if (key === DPAD.RIGHT) { e.preventDefault(); moveFocus('down'); return; }
-  if (key === DPAD.SELECT) { e.preventDefault(); activateFocused(); }
-}, true);
+  if (g === 'enter') activateFocused();
+}
+
+/* Settings rows with a value (the <small> on the right) cycle on Right as
+   well as on a pinch. Diagnostics, the last row, only opens on a pinch. */
+function settingsCycles(el) {
+  return !!(el && el.closest && el.closest('#screen-settings') && el.querySelector('small'));
+}
+
+/* ---- Diagnostics: Input test ---------------------------------------------
+
+   Records the next INPUT_TEST_MAX raw key events exactly as the band sends
+   them (key, code, keyCode, repeat, gap since the previous event, how long
+   the key was held) so the arbiter's thresholds can be checked against the
+   real hardware. While it runs, keys only record; it stops by itself after
+   INPUT_TEST_IDLE_MS without a key, then reports to the server log. */
+const INPUT_TEST_MAX = 20;
+const INPUT_TEST_IDLE_MS = 8000;
+let inputTest = null;
+
+function inputTestStart() {
+  if (inputTest) return;
+  inputTest = { rows: [], prevAt: 0, down: {}, idle: 0 };
+  inputTestArm();
+  renderInputTest();
+}
+
+function inputTestArm() {
+  if (!inputTest) return;
+  clearTimeout(inputTest.idle);
+  inputTest.idle = setTimeout(inputTestEnd, INPUT_TEST_IDLE_MS);
+}
+
+function inputTestNote(type, e) {
+  if (!inputTest || inputTest.done) return;
+  const now = Date.now();
+  if (type === 'keyup') {
+    const row = inputTest.down[(e && (e.key || e.code || e.keyCode)) || '?'];
+    if (row && row.held == null) {
+      row.held = now - row.at;
+      renderInputTest();
+    }
+    return;
+  }
+  const row = {
+    type: type,
+    key: e ? String(e.key || '') : '',
+    code: e ? String(e.code || '') : '',
+    keyCode: e ? Number(e.keyCode || 0) : 0,
+    repeat: !!(e && e.repeat),
+    gap: inputTest.prevAt ? now - inputTest.prevAt : null,
+    held: null,
+    at: now,
+  };
+  inputTest.prevAt = now;
+  inputTest.rows.push(row);
+  if (e) inputTest.down[e.key || e.code || e.keyCode || '?'] = row;
+  inputTestArm();
+  renderInputTest();
+  if (inputTest.rows.length >= INPUT_TEST_MAX) inputTestEnd();
+}
+
+function inputTestEnd() {
+  if (!inputTest || inputTest.done) return;
+  clearTimeout(inputTest.idle);
+  inputTest.done = true;
+  renderInputTest();
+  hudNote('input-test', {
+    events: inputTest.rows.map(function (r) {
+      return { t: r.type, key: r.key, code: r.code, kc: r.keyCode, rep: r.repeat, gap: r.gap, held: r.held };
+    }),
+    stats: Object.assign({}, inputStats),
+  });
+  // Keep the result on screen; the next key works normally again.
+  const shown = inputTest;
+  inputTest = null;
+  renderInputTest(shown);
+}
+
+function renderInputTest(state) {
+  const box = $('#input-log');
+  if (!box) return;
+  const t = state || inputTest;
+  if (!t) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  const head = t.done
+    ? 'Input test · ' + t.rows.length + ' events · sent'
+    : 'Input test · ' + t.rows.length + '/' + INPUT_TEST_MAX + ' · swipe or pinch';
+  box.innerHTML = '';
+  const h = document.createElement('div');
+  h.className = 'input-log-head';
+  h.textContent = head;
+  box.appendChild(h);
+  t.rows.slice(-8).forEach(function (r) {
+    const d = document.createElement('div');
+    d.className = 'input-log-row';
+    d.textContent = (r.type === 'keydown' ? '' : r.type + ' ') +
+      (r.key || r.code || '?') + ' · ' + r.keyCode +
+      (r.repeat ? ' · rep' : '') +
+      ' · ' + (r.gap == null ? 'first' : '+' + r.gap + 'ms') +
+      ' · held ' + (r.held == null ? '-' : r.held + 'ms');
+    box.appendChild(d);
+  });
+}
 
 document.querySelectorAll('#screen-home [data-menu]').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -2197,11 +2779,17 @@ document.querySelectorAll('#screen-home [data-menu]').forEach(btn => {
     if (menu === 'continue') openContinue();
     if (menu === 'search') openSearch();
     if (menu === 'library') openLibrary();
-    if (menu === 'queue') openQueue();
-    if (menu === 'settings') { renderSettings(); show('settings'); }
-    if (menu === 'debug') { renderDebug(); show('debug'); }
+    if (menu === 'settings') openSettings();
   });
 });
+
+function openSettings() {
+  navTo({ name: 'settings', render: function () { renderSettings(); show('settings'); } });
+}
+
+function openDebug() {
+  navTo({ name: 'debug', render: function () { renderDebug(); show('debug'); } });
+}
 
 window.addEventListener('offline', () => setOffline(true));
 window.addEventListener('online', () => {
@@ -2230,14 +2818,9 @@ window.addEventListener('pageshow', function (e) {
   onResume();
 });
 window.addEventListener('focus', function () { pollNow(); });
-// Any key is activity: it keeps the fast cadence and holds off an update reload.
-window.addEventListener('keydown', function () {
-  lastKeyAt = Date.now();
-  lastActiveAt = lastKeyAt;
-  pollSoonerIfIdle();
-}, true);
+// Key activity (lastKeyAt, lastActiveAt, pollSoonerIfIdle) is recorded by
+// the WP3 input arbiter, the one keydown path.
 
-$('#btn-phone-back').addEventListener('click', () => show('home'));
 // "Link a different phone" is how you hand the glasses to a different phone,
 // so it has to drop the durable link too, not just the six characters on
 // screen. It takes two pinches: one stray pinch must not unpair the iPhone.
@@ -2262,12 +2845,10 @@ $('#btn-pair-new').addEventListener('click', () => {
   linkStore('');
   newPairCode();
 });
-$('#btn-debug-back').addEventListener('click', () => show('home'));
+$('#btn-debug').addEventListener('click', openDebug);
+$('#btn-input-test').addEventListener('click', inputTestStart);
 const relayBtn = $('#btn-relay');
 if (relayBtn) relayBtn.addEventListener('click', openRelay);
-const searchBack = $('#btn-search-back');
-if (searchBack) searchBack.addEventListener('click', () => show('home'));
-$('#btn-settings-back').addEventListener('click', () => show('home'));
 $('#btn-retest').addEventListener('click', runSelfTest);
 $('#btn-copy-debug').addEventListener('click', function () {
   const t = ($('#debug-log') && $('#debug-log').value) || 'No errors yet.';
@@ -2335,6 +2916,9 @@ function ensureListening() {
   newPairCode();
 }
 
+// Seed the nav stack's root in history, so the first pushState has a depth-0
+// entry to come back to (system Back on firmware v125.1+, and ArrowLeft).
+try { history.replaceState({ gt: 1, d: 0 }, ''); } catch (e) { /* no history API */ }
 sessionStore(sessionLoad());
 renderSettings();
 renderHome();

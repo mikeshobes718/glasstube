@@ -318,8 +318,8 @@ button { font-family: inherit; }
 
 .back-row { margin-top: auto; padding-top: 0; }
 
-/* Back rows are interim (WP3 replaces them with a footer hint). They sit in
-   the footer zone as an 18px hint, so the content keeps y 88-552. */
+/* Small secondary actions (Diagnostics actions, the relay offer): 18px, they
+   sit low so the content keeps y 88-552. Back itself is the #nav-foot hint. */
 .back-btn {
   width: auto;
   align-self: flex-start;
@@ -1032,8 +1032,77 @@ body.hud-player .errbar { display: none !important; }
   gap: 8px;
 }
 
-/* interim until WP3/WP8 drop the focusable Back row on Search: it keeps DOM
-   focus while the band drives the grid cursor, and a pinch goes to the grid,
-   so the cursor must be the only focus indicator there. */
-#btn-search-back::after { display: none; }
-#btn-search-back:focus { color: var(--t3); }
+/* WP3: navigation footer, list counter, row loading, press, input test */
+.nav-foot {
+  position: absolute;
+  left: 24px;
+  top: 556px;
+  height: 24px;
+  z-index: 5;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--t3);
+  pointer-events: none;
+}
+
+/* Screens with the footer hint end their content at y 552 (the zone line),
+   so no row or fade runs under '◀ Back'. */
+body.has-foot .screen:not(.screen-flush) { padding-bottom: 48px; }
+
+.list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.list-head .title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.list-count {
+  flex: 0 0 auto;
+  margin-right: 4px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t3);
+  font-variant-numeric: tabular-nums;
+}
+
+.pressed { transform: scale(.97); transition: transform 120ms var(--ease); }
+
+.row-load {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t2);
+}
+.row-spin {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 3px solid var(--hair);
+  border-top-color: var(--t1);
+  box-sizing: border-box;
+  animation: row-spin 800ms linear infinite;
+}
+@keyframes row-spin { to { transform: rotate(360deg); } }
+
+.input-log {
+  width: 100%;
+  padding: 0 4px 8px;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--t2);
+  font-variant-numeric: tabular-nums;
+}
+.input-log-head { color: var(--t1); font-weight: 700; margin-bottom: 4px; }
+.input-log-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
