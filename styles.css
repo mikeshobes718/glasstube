@@ -301,7 +301,9 @@ button { font-family: inherit; }
   text-overflow: ellipsis;
 }
 
-/* Play all: the only filled button on the HUD. */
+/* Play all: an outlined pill. White text on a red fill read poorly on the
+   additive lens, so it is white on black with a white outline (Mike,
+   2026-10-14); focus still adds the 3px ring 4px outside it. */
 .list-btn.is-action {
   width: auto;
   align-self: flex-start;
@@ -310,7 +312,9 @@ button { font-family: inherit; }
   /* Room for the ring below, so the scroll area never clips it. */
   margin: 7px 7px 11px;
   padding: 0 32px;
-  background: var(--accent);
+  background: transparent;
+  border: 2px solid var(--t1);
+  box-sizing: border-box;
   color: var(--t1);
   border-radius: 32px;
   font-size: 24px;
@@ -320,8 +324,8 @@ button { font-family: inherit; }
 
 .list-btn.is-action .list-label { color: var(--t1); }
 
-/* A 4px black gap between the 3px ring and the red pill (plan: 'Focus ring
-   offset 4px'), so the ring never merges with the fill. */
+/* A 4px black gap between the 3px ring and the outlined pill (plan: 'Focus
+   ring offset 4px'), so the ring never merges with the outline. */
 .list-btn.is-action::after {
   inset: -7px;
   border-radius: 39px;

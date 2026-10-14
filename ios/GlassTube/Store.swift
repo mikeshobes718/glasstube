@@ -267,11 +267,13 @@ final class Store: ObservableObject {
             note = String(result["fileError"] as? String ??
                 "Sent, but no video file. The glasses will try their own routes.")
         }
+        let state = String((result["delivery"] as? [String: Any])?["state"] as? String ?? "")
         outcome = SendOutcome(ok: ok,
                               message: note,
                               hasFile: hasFile,
                               itag: String(result["itag"] as? String ?? ""),
-                              detail: String(result["debug"] as? String ?? ""))
+                              detail: String(result["debug"] as? String ?? ""),
+                              pending: !ok && ["got", "pinch", "hidden", "missed"].contains(state))
         if ok { remember(videos) }
     }
 

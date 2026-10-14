@@ -101,11 +101,13 @@ struct OutcomeBanner: View {
     let outcome: SendOutcome
 
     private var tone: Color {
+        if outcome.pending { return .orange }
         if !outcome.ok { return .red }
         return outcome.hasFile ? .green : .orange
     }
 
     private var symbol: String {
+        if outcome.pending { return "eyeglasses" }
         if !outcome.ok { return "exclamationmark.triangle.fill" }
         return outcome.hasFile ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
     }

@@ -1024,7 +1024,9 @@ const Player = (() => {
       const v = html5;
       if (v.error) return 'Media error ' + (v.error.code || '?') + ' on ' + lastRoute;
       if (v.networkState === 3) return 'no source';
-      if (lastRoute === 'proxy' && !metaAt && now - loadAt > 6000) return 'no metadata in 6s';
+      // 9s: the server's own /api/watch timeout is 8s, so 6s gave up on answers
+      // that were still coming (Mike, 2026-10-14).
+      if (lastRoute === 'proxy' && !metaAt && now - loadAt > 9000) return 'no metadata in 9s';
       const b = buffered();
       if (b > lastBuffered) {
         lastBuffered = b;

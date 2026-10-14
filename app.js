@@ -2730,10 +2730,12 @@ function playerPinch() {
     updateChrome();
     return;
   }
+  // Pinch on 'Finished' replays the video just watched, not the whole list
+  // (Mike, 2026-10-14); Play all on the list still restarts it.
   if (finished) {
     finished = false;
     setPlayGate(false);
-    openPlayer(0, true, 0);
+    openPlayer(queueIndex, true, 0);
     return;
   }
   needGesture = false;
