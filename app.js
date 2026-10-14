@@ -2004,7 +2004,10 @@ function onVideoEnded() {
     return;
   }
   const n = nextIndex(true);
-  if (n >= 0) startUpNext(n);
+  // The menu holds focus: the countdown waits for it to close, so a video
+  // never starts behind the menu and a pinch meant for a row stays a row.
+  if (n >= 0 && menuIsOpen()) upNextPending = n;
+  else if (n >= 0) startUpNext(n);
   else showFinished();
 }
 
@@ -2484,6 +2487,7 @@ let leaveArmedAt = 0;
 let menuTimer = 0;
 let upNextTimer = 0;
 let upNextIdx = -1;
+let upNextPending = -1;
 let upNextLeft = 0;
 let finished = false;
 const CHROME_HOLD_MS = 3000;
@@ -2617,6 +2621,7 @@ function chromeShow() {
 
 /* Everything WP7 adds is per video; a new video or leaving starts clean. */
 function playerUiReset() {
+  upNextPending = -1;
   closePlayerMenu();
   cancelUpNext();
   finished = false;
@@ -2786,6 +2791,7 @@ function playUpNext() {
 }
 
 function cancelUpNext() {
+  upNextPending = -1;
   if (upNextTimer) clearInterval(upNextTimer);
   upNextTimer = 0;
   upNextIdx = -1;
@@ -2848,7 +2854,11 @@ function closePlayerMenu() {
   if (screens.player) screens.player.classList.remove('menu-open');
   const a = document.activeElement;
   if (a && m.contains(a) && a.blur) a.blur();
-  if (current === 'player') chromeShow();
+  // A video that ended while the menu was open gets its full Up next count now.
+  const pending = upNextPending;
+  upNextPending = -1;
+  if (current === 'player' && pending >= 0 && queue[pending]) startUpNext(pending);
+  else if (current === 'player') chromeShow();
 }
 
 function menuKey(k) {
@@ -2872,6 +2882,8 @@ function menuAct(row) {
     renderPlayerMenu();
     updateChrome();
   };
+  // Rows that change the video drop a pending Up next instead of flashing it.
+  if (act === 'next' || act === 'prev' || act === 'restart') upNextPending = -1;
   if (act === 'next') {
     closePlayerMenu();
     playNext();
