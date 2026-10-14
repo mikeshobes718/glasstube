@@ -1147,8 +1147,16 @@ window.addEventListener('popstate', function (e) {
   navPopTo(target);
 });
 
+/* The first render starts at startAt. A later re-render (Back onto this
+   entry from a screen stacked over the player) resumes where the wearer left
+   that video instead of replaying the captured start point. */
 function navPlayer(index, startAt) {
-  navTo({ name: 'player', render: function () { openPlayer(index, true, startAt); } });
+  let opened = false;
+  navTo({ name: 'player', render: function () {
+    const v = queue[index];
+    openPlayer(index, true, opened && v ? resumeAt(v.id) : startAt);
+    opened = true;
+  } });
 }
 
 function navVideoList(title, videos, kind, opts) {
@@ -2065,6 +2073,13 @@ function applyPush(dest) {
     return;
   }
   if (dest.kind === 'channel' && dest.id) {
+    // Never stack a phone-sent channel over the player: Back from it would
+    // re-open (and auto-start) that video. Leave the player first, onto the
+    // list under it with the played row focused; the channel list then
+    // reuses the player's history entry.
+    if (current === 'player' && navDepth() > 0 && navTop().name === 'player') {
+      navPopTo(navDepth() - 1);
+    }
     loadChannel({ id: dest.id, name: dest.name || 'Channel' });
     showToast('From your iPhone · ' + (dest.name || 'Channel'), 'info', 3000);
     return;
@@ -4406,20 +4421,29 @@ if (kbField) {
 $('#btn-retest').addEventListener('click', runSelfTest);
 $('#btn-copy-debug').addEventListener('click', function () {
   const t = ($('#debug-log') && $('#debug-log').value) || 'No errors yet.';
-  function ok() {
+  function say(msg) {
     const hint = $('#debug-copy-msg');
-    if (hint) hint.textContent = 'Copied. Paste it in chat.';
+    if (hint) hint.textContent = msg;
+  }
+  function ok() { say('Copied. Paste it in chat.'); }
+  // Select + execCommand, for a WebView with no clipboard API or one that
+  // refuses writeText. Either way the wearer always gets a line back.
+  function fallback() {
+    const el = $('#debug-log');
+    let done = false;
+    if (el) {
+      el.focus();
+      el.select();
+      try { done = !!document.execCommand('copy'); } catch (e) { done = false; }
+    }
+    if (done) ok();
+    else say('Could not copy.');
   }
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(t).then(ok).catch(function () {});
+    navigator.clipboard.writeText(t).then(ok, fallback);
     return;
   }
-  const el = $('#debug-log');
-  if (el) {
-    el.focus();
-    el.select();
-    try { document.execCommand('copy'); ok(); } catch (e) {}
-  }
+  fallback();
 });
 $('#btn-sound').addEventListener('click', () => {
   if (!sound) return;
