@@ -1008,12 +1008,17 @@ function navHistory() {
    pages, a new push replacing an older one). Home is never replaced. */
 function navTo(entry, opts) {
   const replace = !!(opts && opts.replace) && navStack.length > 1;
-  navSave();
+  const under = !!(opts && opts.under);
+  // An 'under' caller has saved and trimmed the stack itself: the screen on
+  // view may no longer be the top entry, so saving here would clobber it.
+  if (!under) navSave();
   navGen++;
   feedWait = '';
   if (replace) navStack[navStack.length - 1] = entry;
   else navStack.push(entry);
-  navHistory();
+  // opts.under: an entry that a player is about to cover. If history already
+  // reaches this depth, leave it alone so the player can reuse that entry.
+  if (!under || histDepth() < navDepth()) navHistory();
   navRender(entry, false);
 }
 
@@ -2043,10 +2048,17 @@ function applyPush(dest) {
 
 /* A push replaces what is playing rather than stacking on it: the player on
    top (and an older pushed list under it) are swapped out, so a second push
-   never makes Back walk through the first one. */
+   never makes Back walk through the first one. The pushed list and its player
+   reuse the history entries they replace (no pushState over an entry that was
+   dropped without history.back()), and the list never sits deeper than
+   HIST_MAX - 1, so the player stays within the history cap and system Back
+   from it lands on the list exactly like ArrowLeft does. */
 function navPushList(title, videos) {
+  navSave();
   if (navStack.length > 1 && navTop().name === 'player') navStack.pop();
-  navVideoList(title, videos, 'push', { replace: navTop().kind === 'push' });
+  if (navStack.length > 1 && navTop().kind === 'push') navStack.pop();
+  if (navStack.length > HIST_MAX - 1) navStack.length = HIST_MAX - 1;
+  navVideoList(title, videos, 'push', { under: true });
 }
 
 /* The phone's LAN relay is plain HTTP and the HUD is HTTPS, so it can never be
