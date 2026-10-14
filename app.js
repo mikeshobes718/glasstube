@@ -86,7 +86,6 @@ let pairLink = '';
 let pairTimer = null;
 let pairLastSeq = -1;
 let pairReplaces = ''; // WP6: link token a fresh mint replaces
-let pairPolls = 0;
 let pairMintTimer = 0;
 let pairState = 'not paired';
 let feedHealth = 'not called yet';
@@ -3552,7 +3551,6 @@ function pollPair() {
       pairPairedSet(d.paired === true);
       pairState = (d.paired ? 'paired' : 'waiting') + ' · ' + pairCode;
       renderHome();
-      pairPolls += 1;
       if (d.paired === true) pairTouchMaybe();
       if (current === 'phone') renderPhone();
       const dest = d.dest;
@@ -3998,9 +3996,9 @@ document.addEventListener('keydown', function (e) {
   const fieldTyping = inField && !!r && (!!r.char || e.key === 'Backspace');
   if (!fieldTyping && !(inField && r && r.name === 'enter' && !typed.trim())) e.preventDefault();
   const now = Date.now();
-  // Any resolved gesture is a user activation: let WP5's player unlock audio
-  // on it synchronously, inside the gesture.
-  // Player.unlock (WP5) runs again whenever the element is still locked.
+  // Any resolved gesture is a user activation: let WP5's player unlock the
+  // video element on it synchronously, inside the gesture, while it is still
+  // locked.
   if (!Player.unlocked()) {
     try { Player.unlock(); } catch (x) { /* unlock is best effort */ }
   }
@@ -4217,6 +4215,9 @@ function onResume() {
 }
 document.addEventListener('visibilitychange', function () {
   if (!document.hidden) { onResume(); return; }
+  // Hidden: save progress now (it is otherwise saved at most every 10s while
+  // playing) and drop to the hidden poll cadence.
+  if (current === 'player') progressSave();
   if (!pollBusy && pairKey()) schedulePoll(nextPollDelay());
 });
 let firstPageshow = true;
@@ -4350,11 +4351,7 @@ function ensureListening() {
 // entry to come back to (system Back on firmware v125.1+, and ArrowLeft).
 try { history.replaceState({ gt: 1, d: 0 }, ''); } catch (e) { /* no history API */ }
 
-// Progress is saved at most every 10s while playing; leaving or hiding the
-// page saves now.
-document.addEventListener('visibilitychange', function () {
-  if (document.visibilityState === 'hidden' && current === 'player') progressSave();
-});
+// Leaving the page saves progress now too (hiding it is handled above).
 window.addEventListener('pagehide', function () {
   if (current === 'player') progressSave();
 });

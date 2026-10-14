@@ -338,8 +338,6 @@ button { font-family: inherit; }
   box-sizing: border-box;
 }
 
-.back-hint { color: var(--t3); font-size: 18px; margin-left: 8px; }
-
 /* Focus: one style on every screen. A 3px white ring (white is about 4x
    brighter than red on this panel) and the label going to full white.
    Opacity only, so the change stays on the compositor. */
@@ -1585,28 +1583,8 @@ body.hud-player .status { display: none !important; }
   cursor: pointer;
 }
 
-#player-menu .pm-row:focus {
-  outline: none;
-  background: transparent;
-  box-shadow: none;
-  color: var(--t1, #fff);
-}
-
-#player-menu .pm-row::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border: 3px solid var(--t1, #fff);
-  border-radius: 16px;
-  opacity: 0;
-  transition: opacity 240ms cubic-bezier(.6, 0, .4, 1);
-  pointer-events: none;
-}
-
-#player-menu .pm-row:focus::after {
-  opacity: 1;
-  transition-duration: 180ms;
-}
+/* Menu rows are .focusable: the design-system ring and the --t1 label on
+   focus come from the shared .focusable rules, not a copy here. */
 
 .pm-val {
   font-size: 24px;
@@ -1642,5 +1620,4 @@ body.hud-player .toast {
   -webkit-line-clamp: 1;
 }
 
-#stage:has(> #toast:not(.hidden)) #player-hint,
-#screen-player.toasting #player-hint { visibility: hidden; }
+#stage:has(> #toast:not(.hidden)) #player-hint { visibility: hidden; }
