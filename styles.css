@@ -1378,6 +1378,15 @@ body.toast-up:not(.hud-player) #screen-home { padding-bottom: var(--toast-room, 
   line-height: 28px;
   font-weight: 600;
   color: var(--warn, #ffc24a);
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#btn-missed .missed-tag small {
+  display: inline;
+  width: auto;
+  color: var(--t2);
 }
 #btn-missed .missed-title {
   display: block;
@@ -1390,12 +1399,15 @@ body.toast-up:not(.hud-player) #screen-home { padding-bottom: var(--toast-room, 
   text-overflow: ellipsis;
 }
 #btn-missed small {
-  width: 100%;
   font-size: 22px;
   line-height: 28px;
   font-weight: 500;
   margin-top: 0;
 }
+
+/* Home fits one screen: with an optional row showing, From iPhone is a
+   one-line 60px row (homeFit() sets .home-tight; the link chip keeps state). */
+.list-home.home-tight [data-menu="phone"] small { display: none; }
 
 /* WP4: From iPhone, linked and not linked. */
 .pair-linked {
