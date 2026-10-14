@@ -1695,7 +1695,9 @@ function openPlayer(index, autoplay, startAt, opts) {
     wayPos = 0;
     wayFor = video.id;
   }
-  if (blockedFor && blockedFor !== video.id) blockedFor = '';
+  // A fresh open (not a route retry) starts clean, even for the video that
+  // just hit the final error: that error is only for this attempt.
+  if (blockedFor && (!opts.retry || blockedFor !== video.id)) blockedFor = '';
   if (current !== 'player') legendCount();
   playerUiReset();
   nowPlaying = video;
@@ -1851,6 +1853,7 @@ function playNext() {
     showToast('End of list', 'info');
     return;
   }
+  progressSave();
   openPlayer(n, true, resumeAt(queue[n] && queue[n].id));
 }
 
@@ -1861,6 +1864,8 @@ function playPrev() {
     return;
   }
   const prev = queueIndex - 1;
+  // Marks are only written every 10s; keep the exact point being left.
+  progressSave();
   openPlayer(prev, true, resumeAt(queue[prev] && queue[prev].id));
 }
 
@@ -2546,6 +2551,12 @@ function seekBy(dir) {
   else seekStep = 10;
   seekDir = dir;
   seekAt = now;
+  // A seek on 'Finished' takes the wearer back into this video: the gate
+  // reads 'Pinch to play' and a pinch plays from here, not from video 1.
+  if (finished) {
+    finished = false;
+    setPlayGate(false);
+  }
   Player.seek(dir * seekStep);
   setText('#player-seek', (dir > 0 ? '+' : '−') + seekStep + 's');
   if (seekTimer) clearTimeout(seekTimer);
