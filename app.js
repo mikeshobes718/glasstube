@@ -3755,6 +3755,8 @@ function updateLine() {
 
 function renderDebug() {
   const rows = $('#debug-rows');
+  // A self-test answer re-renders the rows: keep the page the band is on.
+  const keep = current === 'debug' ? rows.scrollTop : 0;
   rows.innerHTML = '';
   debugLines().forEach(function (row) {
     const d = document.createElement('div');
@@ -3776,6 +3778,7 @@ function renderDebug() {
   ]).join('\n');
   const logEl = $('#debug-log');
   if (logEl) logEl.value = dump;
+  if (keep) rows.scrollTo({ top: keep, behavior: 'instant' });
   if (current === 'debug') syncFades();
 }
 
@@ -4056,6 +4059,7 @@ function handleDefaultKey(ev) {
     goBack();
     return;
   }
+  if ((g === 'up' || g === 'down') && current === 'debug' && pageDebug(g)) return;
   if (g === 'up') { moveFocus('up'); return; }
   if (g === 'down') { moveFocus('down'); return; }
   if (g === 'right') {
@@ -4068,6 +4072,29 @@ function handleDefaultKey(ev) {
     return;
   }
   if (g === 'enter') activateFocused();
+}
+
+/* Diagnostics: the status rows are not focusable, so the band pages them.
+   Down pages #debug-rows until its last line shows, then walks the buttons.
+   Up walks the buttons back to the first, then pages the rows up. Returns
+   true when it scrolled, so the key does not also move focus. */
+function pageDebug(dir) {
+  const body = $('#debug-rows');
+  if (!body || body.offsetParent === null) return false;
+  const max = Math.max(0, body.scrollHeight - body.clientHeight);
+  if (!max) return false;
+  const top = body.scrollTop;
+  if (dir === 'up') {
+    const f = focusables();
+    if (f.indexOf(document.activeElement) > 0 || top <= 1) return false;
+  } else if (top >= max - 1) {
+    return false;
+  }
+  const step = Math.max(28, body.clientHeight - 56);
+  const next = Math.max(0, Math.min(max, Math.round(top + (dir === 'up' ? -step : step))));
+  body.scrollTo({ top: next, behavior: 'instant' });
+  updateFades(body, next);
+  return true;
 }
 
 /* Settings rows with a value (the <small> on the right) cycle on Right as

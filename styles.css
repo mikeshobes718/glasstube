@@ -236,6 +236,10 @@ button { font-family: inherit; }
   justify-content: center;
 }
 
+/* The status line is a nowrap flex item; without a cap it grows to its text
+   width and runs past the row, so its ellipsis never applies. */
+.list-home .menu-btn small { max-width: 100%; }
+
 .list-settings .menu-btn {
   min-height: 64px;
   padding: 0 20px;
@@ -266,6 +270,9 @@ button { font-family: inherit; }
 .list-btn .list-copy {
   min-width: 0;
   flex: 1 1 auto;
+  /* 10px clear of the ring: a one-line row stays 64px, a row with a second
+     line grows to 84px (36 + 28 + 20) instead of filling 64px edge to edge. */
+  padding: 10px 0;
 }
 
 /* Text rows (channels, playlists, library) keep one line; video rows clamp
