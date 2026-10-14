@@ -1826,7 +1826,7 @@ function openPlayer(index, autoplay, startAt, opts) {
   // just hit the final error: that error is only for this attempt.
   if (blockedFor && (!opts.retry || blockedFor !== video.id)) blockedFor = '';
   if (current !== 'player') legendCount();
-  playerUiReset();
+  playerUiReset(!!opts.retry);
   nowPlaying = video;
   deliveryVideo(video.id);
   recentsAdd(video);
@@ -2620,15 +2620,17 @@ function chromeShow() {
 }
 
 /* Everything WP7 adds is per video; a new video or leaving starts clean. */
-function playerUiReset() {
+function playerUiReset(keepUi) {
   upNextPending = -1;
-  closePlayerMenu();
+  // A quiet route retry of the same video keeps what the wearer has open: the
+  // menu with its focus, and an armed guarded exit.
+  if (!keepUi) closePlayerMenu();
   cancelUpNext();
   finished = false;
   bufferSince = 0;
   missedPlayedId = '';
   // Leaving by any path (system Back included) drops the guarded-exit prompt.
-  disarmLeave();
+  if (!keepUi) disarmLeave();
   if (chromeTimer) clearTimeout(chromeTimer);
   chromeTimer = 0;
   if (seekTimer) clearTimeout(seekTimer);
@@ -2636,7 +2638,8 @@ function playerUiReset() {
   setText('#player-seek', '');
   const scr = screens.player;
   if (scr) {
-    scr.classList.remove('dim', 'fault', 'upnext', 'menu-open', 'rebuffer', 'stall');
+    scr.classList.remove('dim', 'fault', 'upnext', 'rebuffer', 'stall');
+    if (!keepUi) scr.classList.remove('menu-open');
     scr.classList.add('chrome-on');
   }
   const nextAct = $('#player-action-next');

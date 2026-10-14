@@ -888,7 +888,10 @@ const Player = (() => {
     if (html5) {
       if (html5.ended) return 0;
       if (!html5.paused && html5.readyState >= 2) return 1;
-      if (html5.paused && html5.currentTime > 0.2) return 2;
+      // A pause the wearer made counts at any time, 0:00 included (pinch in the
+      // first 0.2 s, or Up back to the start); otherwise a paused element at 0
+      // is still loading.
+      if (html5.paused && (html5.currentTime > 0.2 || (holdPause && html5.readyState >= 2))) return 2;
       if (html5.readyState === 2 || html5.seeking) return 3;
       return -1;
     }
