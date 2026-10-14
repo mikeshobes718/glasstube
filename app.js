@@ -795,7 +795,9 @@ function renderContinue() {
   if (!btn) return;
   const p = progressLoad();
   if (!p) {
+    const had = document.activeElement === btn;
     btn.classList.add('hidden');
+    if (had) homeRefocus(btn);
     return;
   }
   btn.classList.remove('hidden');
@@ -935,6 +937,7 @@ function updateHomePhoneHint() {
 }
 
 function renderHome() {
+  const had = current === 'home' ? document.activeElement : null;
   updateHomePhoneHint();
   renderMissed();
   renderContinue();
@@ -942,6 +945,23 @@ function renderHome() {
   if (lib) lib.classList.toggle('hidden', !ytSession);
   const sub = document.querySelector('[data-menu="library"] small');
   if (sub) sub.textContent = 'Subscriptions, playlists, liked';
+  homeRefocus(had);
+}
+
+/* A row Home just hid (Library, Missed, Continue) must not keep focus, or the
+   next pinch lands nowhere: move to the next visible row, else the previous. */
+function homeRefocus(had) {
+  const home = screens.home;
+  if (!had || !home || current !== 'home' || !home.contains(had) || had.offsetParent !== null) return;
+  const a = document.activeElement;
+  if (a && a !== had && a !== document.body && home.contains(a) && a.offsetParent !== null) return;
+  const rows = [].slice.call(home.querySelectorAll('.focusable:not([disabled])'));
+  const i = rows.indexOf(had);
+  const ok = function (el) { return el.offsetParent !== null; };
+  const el = rows.slice(i + 1).filter(ok)[0] || rows.slice(0, Math.max(i, 0)).filter(ok).pop();
+  if (!el) return;
+  el.focus();
+  reveal(el);
 }
 
 /* ---- Navigation stack ----------------------------------------------------
@@ -1775,6 +1795,7 @@ const LAST_PUSH_KEY = 'glasstube.lastPush';
 const PUSH_START_TEXT = 'From your iPhone · starting…';
 const IDLE_HOME_MS = 5000;
 let missedMem = {};
+let missedPlayedId = '';
 let pendingPush = null;
 let pushStartId = '';
 let pushStartAt = 0;
@@ -1847,6 +1868,7 @@ function lastPushOutcome(outcome) {
 /* From updateChrome: the video on screen is really playing. */
 function pushPlayed() {
   pushStartId = '';
+  if (nowPlaying) missedPlayed(nowPlaying.id);
   if (lastPushMine() && lastPushInfo.outcome !== 'played' && lastPushInfo.outcome !== 'missed') {
     lastPushOutcome('played');
   }
@@ -1893,11 +1915,27 @@ function missedAdd(dest, sentAt) {
       return { id: v.id, title: v.title || '', channel: v.channel || '', thumb: v.thumb || '' };
     }),
   };
-  missedSave([entry].concat(missedLoad().filter(function (m) { return m.key !== key; })));
+  // A re-send of the same video replaces its older Missed entry.
+  missedSave([entry].concat(missedLoad().filter(function (m) {
+    if (m.key !== key && m.id !== entry.id) return true;
+    if (m.key !== key) delete missedMem[m.key];
+    return false;
+  })));
 }
 
 function missedTake(key) {
   missedSave(missedLoad().filter(function (m) { return m.key !== key; }));
+}
+
+/* A video that has played, by any path, is no longer missed. */
+function missedPlayed(id) {
+  if (!id || id === missedPlayedId) return;
+  missedPlayedId = id;
+  const list = missedLoad();
+  const keep = list.filter(function (m) { return m.id !== id; });
+  if (keep.length === list.length) return;
+  list.forEach(function (m) { if (m.id === id) delete missedMem[m.key]; });
+  missedSave(keep);
 }
 
 /* The top Home row. Only the newest missed push shows; the next one takes
@@ -2067,12 +2105,15 @@ function applyPush(dest) {
    reuse the history entries they replace (no pushState over an entry that was
    dropped without history.back()), and the list never sits deeper than
    HIST_MAX - 1, so the player stays within the history cap and system Back
-   from it lands on the list exactly like ArrowLeft does. */
+   from it lands on the list exactly like ArrowLeft does. At the cap the
+   entry the wearer is on is kept (Back from the pushed list returns to it)
+   and the oldest level above Home is collapsed instead, so the stack keeps
+   the same depth as history. */
 function navPushList(title, videos) {
   navSave();
   if (navStack.length > 1 && navTop().name === 'player') navStack.pop();
   if (navStack.length > 1 && navTop().kind === 'push') navStack.pop();
-  if (navStack.length > HIST_MAX - 1) navStack.length = HIST_MAX - 1;
+  while (navStack.length > HIST_MAX - 1 && navStack.length > 2) navStack.splice(1, 1);
   navVideoList(title, videos, 'push', { under: true });
 }
 
@@ -2207,6 +2248,7 @@ let finished = false;
 const CHROME_HOLD_MS = 3000;
 const FINISHED_HOLD_MS = 10000;
 const LEAVE_WINDOW_MS = 2500;
+const LEAVE_PROMPT = 'Swipe left again to leave';
 const MENU_IDLE_MS = 6000;
 const UPNEXT_S = 5;
 const LEGEND_KEY = 'glasstube.legend';
@@ -2338,6 +2380,9 @@ function playerUiReset() {
   cancelUpNext();
   finished = false;
   bufferSince = 0;
+  missedPlayedId = '';
+  // Leaving by any path (system Back included) drops the guarded-exit prompt.
+  if (leaveArmedAt && ($('#toast') || {}).textContent === LEAVE_PROMPT) hideToast(true);
   leaveArmedAt = 0;
   if (chromeTimer) clearTimeout(chromeTimer);
   chromeTimer = 0;
@@ -2451,7 +2496,7 @@ function guardedLeave() {
   }
   leaveArmedAt = now;
   chromeShow();
-  showToast('Swipe left again to leave', 'info', LEAVE_WINDOW_MS);
+  showToast(LEAVE_PROMPT, 'info', LEAVE_WINDOW_MS);
 }
 
 function leavePlayer() {
