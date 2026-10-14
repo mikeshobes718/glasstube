@@ -1046,6 +1046,7 @@ function navSave() {
   const el = document.activeElement;
   const i = f.indexOf(el);
   top.focusKey = i >= 0 ? focusKeyOf(el) : '';
+  top.focusNth = i >= 0 ? f.slice(0, i).filter(x => focusKeyOf(x) === top.focusKey).length : 0;
   top.focusIdx = i;
   const body = screens[current] && screens[current].querySelector('.screen-body');
   top.scrollTop = body ? body.scrollTop : 0;
@@ -1063,7 +1064,10 @@ function navRestore(entry) {
   if (current === 'player' || current !== entry.name) return;
   const f = focusables();
   let el = null;
-  if (entry.focusKey) el = f.filter(x => focusKeyOf(x) === entry.focusKey)[0] || null;
+  if (entry.focusKey) {
+    const hits = f.filter(x => focusKeyOf(x) === entry.focusKey);
+    el = hits[Math.min(entry.focusNth || 0, hits.length - 1)] || null;
+  }
   if (!el && entry.focusIdx >= 0 && f.length) el = f[Math.min(entry.focusIdx, f.length - 1)];
   if (!el) return;
   const body = screens[current] && screens[current].querySelector('.screen-body');
@@ -1111,6 +1115,13 @@ function navRefresh() {
 function navPopTo(target) {
   target = Math.max(0, Math.min(target, navDepth()));
   const played = current === 'player' && nowPlaying ? nowPlaying.id : '';
+  // Which copy of that id was playing, for lists that hold a video twice.
+  let playedNth = 0;
+  if (played && Array.isArray(queue)) {
+    for (let i = 0; i < queueIndex && i < queue.length; i++) {
+      if (queue[i] && queue[i].id === played) playedNth++;
+    }
+  }
   navGen++;
   feedWait = '';
   navStack.length = target + 1;
@@ -1119,10 +1130,11 @@ function navPopTo(target) {
   // when the queue moved on from the one that was picked.
   if (played && top.videos && top.videos.some(v => v && v.id === played)) {
     top.focusKey = played;
+    top.focusNth = playedNth;
     top.focusIdx = -1;
   }
   navRender(top, true);
-  if (played) labelResumeRow(played);
+  if (played) labelResumeRow(played, playedNth);
   if (target === 0) navRunAfterRoot();
 }
 
@@ -1427,6 +1439,7 @@ function listPageItems(items, title, emptyText, kind, emptyAction) {
   const turn = (np, key) => {
     ent.listPage = np;
     ent.focusKey = key || '';
+    ent.focusNth = 0;
     ent.focusIdx = -1;
     ent.scrollTop = 0;
     renderList(title, items, emptyText, kind, emptyAction);
@@ -2638,13 +2651,11 @@ function noteExit() {
 
 /* Leaving the player lands on the row that was playing (WP3's navPopTo
    focuses it by data-key); this labels it 'Resume · 12:34'. */
-function labelResumeRow(id) {
+function labelResumeRow(id, nth) {
   if (!id || current !== 'list') return;
-  const rows = document.querySelectorAll('#list-items [data-key]');
-  let row = null;
-  for (let i = 0; i < rows.length; i++) {
-    if (rows[i].dataset.key === id) { row = rows[i]; break; }
-  }
+  const rows = [].filter.call(document.querySelectorAll('#list-items [data-key]'),
+    r => r.dataset.key === id);
+  const row = rows[Math.min(nth || 0, rows.length - 1)] || null;
   if (!row) return;
   const t = resumeAt(id);
   // The player starts anything at or below RESUME_MIN_S from 0:00.
