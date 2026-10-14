@@ -180,13 +180,22 @@ function recentsSave(list) {
   catch (e) { /* private mode */ }
 }
 
+/* List rows are 160x90, so the 320x180 mqdefault is all they need. The larger
+   hq, sd and maxres images cost several times the bytes on a slow link. */
+function mqThumb(url, id) {
+  const u = String(url || '');
+  if (!u) return id ? 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg' : '';
+  const m = u.match(/^(https?:\/\/i\d?\.ytimg\.com\/vi(?:_webp)?\/[^/?#]+\/)(?:hqdefault|sddefault|maxresdefault|hq720)\.(jpg|webp)(?:[?#].*)?$/);
+  return m ? m[1] + 'mqdefault.' + m[2] : u;
+}
+
 function recentsAdd(video) {
   const next = recentsLoad().filter(v => v && v.id !== video.id);
   next.unshift({
     id: video.id,
     title: video.title || 'YouTube video',
     channel: video.channel || '',
-    thumb: video.thumb || ('https://i.ytimg.com/vi/' + video.id + '/hqdefault.jpg'),
+    thumb: mqThumb(video.thumb, video.id),
   });
   recentsSave(next);
 }
@@ -316,6 +325,7 @@ function show(name) {
     bar.classList.add('hidden');
     bar.textContent = '';
   }
+  if (name !== 'player') syncFades();
   if (name !== 'player') focusFirst();
 }
 
@@ -328,11 +338,69 @@ function focusables() {
 }
 
 /* Lists are no longer capped at six rows, so the focused row has to be walked
-   into view or the band scrolls into nothing the wearer can see. */
+   into view or the band scrolls into nothing the wearer can see. It is kept
+   centred (block 'center'), never parked on the bottom edge. The target is
+   computed against the row's own scroll body rather than with scrollIntoView,
+   which would also try to scroll the stage, and so the edge fades can be set
+   for where the scroll will end, not where a smooth scroll happens to be. */
 function reveal(el) {
-  if (!el || !el.scrollIntoView) return;
-  try { el.scrollIntoView({ block: 'nearest' }); }
-  catch (e) { el.scrollIntoView(false); }
+  if (!el) return;
+  const body = el.closest ? el.closest('.screen-body') : null;
+  if (!body || el.offsetParent !== body) {
+    if (!el.scrollIntoView) return;
+    try { el.scrollIntoView({ block: 'center' }); }
+    catch (e) { el.scrollIntoView(false); }
+    return;
+  }
+  const max = Math.max(0, body.scrollHeight - body.clientHeight);
+  const top = Math.max(0, Math.min(max,
+    Math.round(el.offsetTop - (body.clientHeight - el.offsetHeight) / 2)));
+  if (Math.abs(body.scrollTop - top) > 1) body.scrollTo({ top: top });
+  updateFades(body, top);
+  thumbsNear(el);
+}
+
+/* The 32px edge fades show only while content continues past that edge. */
+function updateFades(body, top) {
+  if (!body) return;
+  const t = top == null ? body.scrollTop : top;
+  const max = body.scrollHeight - body.clientHeight;
+  body.classList.toggle('fade-top', t > 1);
+  body.classList.toggle('fade-bottom', t < max - 1);
+}
+
+function syncFades() {
+  const scr = screens[current];
+  if (!scr) return;
+  scr.querySelectorAll('.screen-body').forEach(function (b) { updateFades(b); });
+}
+
+// Re-check the fades once any scroll settles (one call per scroll, not per
+// frame), for scrolls that reveal() did not start.
+document.querySelectorAll('.screen-body').forEach(function (b) {
+  if ('onscrollend' in window) {
+    b.addEventListener('scrollend', function () { updateFades(b); }, { passive: true });
+    return;
+  }
+  let settle = 0;
+  b.addEventListener('scroll', function () {
+    clearTimeout(settle);
+    settle = setTimeout(function () { updateFades(b); }, 150);
+  }, { passive: true });
+});
+
+/* Thumbnails carry data-src and only rows within 6 of focus get a real src,
+   so a 40-row list does not pull 40 images over the glasses' slow link. */
+function thumbsNear(el, span) {
+  const box = el && el.parentElement;
+  if (!box) return;
+  const rows = box.children;
+  const idx = Math.max(0, Array.prototype.indexOf.call(rows, el));
+  const n = span == null ? 6 : span;
+  for (let i = Math.max(0, idx - n); i <= Math.min(rows.length - 1, idx + n); i++) {
+    const img = rows[i].querySelector('img[data-src]');
+    if (img && !img.getAttribute('src')) img.src = img.dataset.src;
+  }
 }
 
 function focusFirst() {
@@ -360,6 +428,9 @@ function moveFocus(dir) {
 function activateFocused() {
   const el = document.activeElement;
   if (!el || !el.classList || !el.classList.contains('focusable')) return;
+  // Pinch feedback: a 120ms press on the row.
+  el.classList.add('pressed');
+  setTimeout(function () { el.classList.remove('pressed'); }, 120);
   el.click();
 }
 
@@ -368,6 +439,40 @@ function setStatus(msg, isErr) {
   el.textContent = msg || '';
   el.classList.toggle('hidden', !msg);
   el.classList.toggle('status-err', !!isErr);
+}
+
+/* One short message in the toast lane (y 500-548). kind 'ok', 'err' or 'info'
+   picks the leading glyph (✓ ! ↓); CSS draws it, so textContent stays exactly
+   the text. #toast sits outside the screens, so show() and route retries never
+   clear it. Hides itself after ms (default 4s). */
+let toastTimer = 0;
+let toastFade = 0;
+
+function showToast(text, kind, ms) {
+  const el = $('#toast');
+  if (!el) return;
+  if (!text) { hideToast(true); return; }
+  clearTimeout(toastTimer);
+  clearTimeout(toastFade);
+  const k = (kind === 'ok' || kind === 'err') ? kind : 'info';
+  el.textContent = String(text);
+  el.className = 'toast toast-' + k;
+  toastTimer = setTimeout(hideToast, ms > 0 ? ms : 4000);
+}
+
+function hideToast(now) {
+  const el = $('#toast');
+  if (!el) return;
+  clearTimeout(toastTimer);
+  clearTimeout(toastFade);
+  toastTimer = 0;
+  const done = function () {
+    el.className = 'toast hidden';
+    el.textContent = '';
+  };
+  if (now === true || el.classList.contains('hidden')) { done(); return; }
+  el.classList.add('toast-out');
+  toastFade = setTimeout(done, 260);
 }
 
 function isNetErr(e) {
@@ -542,7 +647,7 @@ function playlistRemember(name, videos) {
       id: v.id,
       title: v.title || 'YouTube video',
       channel: v.channel || '',
-      thumb: v.thumb || ('https://i.ytimg.com/vi/' + v.id + '/hqdefault.jpg'),
+      thumb: mqThumb(v.thumb, v.id),
     })),
   });
   playlistsSave(next);
@@ -599,26 +704,29 @@ function renderList(title, items, emptyText, onBack, backLabel, kind) {
   if (!items.length) {
     const p = document.createElement('div');
     p.className = 'empty-msg';
-    p.textContent = emptyText || 'Nothing here yet.';
+    const text = emptyText || 'Nothing here yet.';
+    // A list still on its way gets the spinner, so it never reads as empty.
+    if (/^(Searching|Loading)\b/.test(text)) {
+      p.classList.add('empty-busy');
+      const spin = document.createElement('span');
+      spin.className = 'load-spin';
+      p.appendChild(spin);
+    }
+    p.appendChild(document.createTextNode(text));
     box.appendChild(p);
   } else {
     items.slice(0, MAX_LIST).forEach(item => {
       const btn = document.createElement('button');
-      btn.className = 'focusable list-btn';
+      btn.className = 'focusable list-btn' + (item.thumb ? ' has-shot' : '') +
+        (item.cls ? ' ' + item.cls : '');
       if (item.thumb) {
         const shot = document.createElement('span');
         shot.className = 'list-shot';
         const img = document.createElement('img');
         img.alt = '';
-        img.loading = 'lazy';
-        img.src = item.thumb;
+        img.decoding = 'async';
+        img.dataset.src = mqThumb(item.thumb);
         shot.appendChild(img);
-        if (item.duration) {
-          const d = document.createElement('span');
-          d.className = 'list-dur';
-          d.textContent = item.duration;
-          shot.appendChild(d);
-        }
         if (item.progress) {
           const bar = document.createElement('span');
           bar.className = 'list-seen';
@@ -642,12 +750,13 @@ function renderList(title, items, emptyText, onBack, backLabel, kind) {
       btn.addEventListener('click', item.onPick);
       box.appendChild(btn);
     });
+    if (box.firstElementChild) thumbsNear(box.firstElementChild);
   }
   const back = $('#list-back');
   back.innerHTML = '';
   const b = document.createElement('button');
   b.className = 'focusable back-btn';
-  b.innerHTML = (backLabel || 'Back') + ' <span class="back-hint">swipe left</span>';
+  b.textContent = '◀ ' + (backLabel || 'Back');
   b.addEventListener('click', listBack);
   back.appendChild(b);
   show('list');
@@ -656,17 +765,17 @@ function renderList(title, items, emptyText, onBack, backLabel, kind) {
 function videoItems(videos, onPick) {
   return videos.map((v, i) => {
     const mark = marksLoad()[v.id];
+    // 'Channel · 14:13 · 35% watched': the duration lives here, not in a
+    // badge over the thumbnail, and view counts are left out.
     const bits = [];
     if (v.channel) bits.push(v.channel);
-    if (v.meta) bits.push(v.meta);
-    else if (v.views) bits.push(v.views);
+    if (v.duration) bits.push(v.duration);
     const seen = markLabel(v.id);
     if (seen) bits.push(seen);
     return {
       label: v.title || 'YouTube video',
       sub: bits.join(' · '),
       thumb: v.thumb,
-      duration: v.duration || '',
       progress: mark && mark.d ? (mark.t / mark.d) * 100 : 0,
       onPick: () => onPick(i, v),
     };
@@ -680,8 +789,8 @@ function showVideoList(title, videos, onBack, kind) {
   const items = [];
   if (videos.length > 1) {
     items.push({
-      label: 'Play all',
-      sub: videos.length + ' videos, then the next one starts itself',
+      label: 'Play all · ' + videos.length,
+      cls: 'is-action',
       onPick: () => {
         queue = maybeShuffle(queue);
         openPlayer(0, true, resumeAt(queue[0] && queue[0].id));
@@ -1174,7 +1283,6 @@ function openChannels(page) {
   const slice = all.slice(start, start + CHANNEL_PAGE);
   const items = slice.map(ch => ({
     label: ch.name,
-    sub: 'Latest videos',
     onPick: () => loadChannel(ch),
   }));
   if (start + CHANNEL_PAGE < all.length) {
@@ -1229,6 +1337,7 @@ function loadChannel(ch, onBack) {
           title: v.title,
           channel: v.channel || ch.name,
           thumb: v.thumb,
+          duration: v.duration || '',
         }));
         showVideoList(ch.name, videos, onBack || (() => openChannels(channelPage)));
       })
@@ -1464,7 +1573,6 @@ function openSubs() {
   const subs = (library && library.subscriptions) || [];
   renderList('Subscriptions', subs.map(ch => ({
     label: ch.name,
-    sub: 'Latest videos',
     thumb: ch.thumb || '',
     onPick: () => loadChannel({ id: ch.id, name: ch.name }, openSubs),
   })), 'No subscriptions found.', openLibrary, 'Back', 'subs');
@@ -1870,12 +1978,7 @@ function noteUpdated() {
   hudNote('updated', { from: from, to: to });
   if (from === to) return;
   const text = 'Updated · v' + to;
-  if (typeof showToast === 'function') { showToast(text, 'ok', 2500); return; }
-  // Until WP2's toast lane lands: the status line, cleared after 2.5s.
-  setStatus(text);
-  setTimeout(function () {
-    if ($('#status').textContent === text) setStatus('');
-  }, 2500);
+  showToast(text, 'ok', 2500);
 }
 
 /* Diagnostics the wearer can actually read back to someone. Every line is a
@@ -1943,7 +2046,9 @@ function renderDebug() {
     const d = document.createElement('div');
     if (row[2] === true) d.className = 'debug-ok';
     if (row[2] === false) d.className = 'debug-bad';
-    d.textContent = row[0] + (/\?$/.test(row[0]) ? ' ' : ': ') + row[1];
+    // Never colour alone: a glyph says it too.
+    const mark = row[2] === true ? '✓ ' : (row[2] === false ? '✗ ' : '');
+    d.textContent = mark + row[0] + (/\?$/.test(row[0]) ? ' ' : ': ') + row[1];
     rows.appendChild(d);
   });
   const errs = window.glasstubeErrors || [];
@@ -1957,6 +2062,7 @@ function renderDebug() {
   ]).join('\n');
   const logEl = $('#debug-log');
   if (logEl) logEl.value = dump;
+  if (current === 'debug') syncFades();
 }
 
 /* Ask the server, out loud, whether it can get this exact video - the single
