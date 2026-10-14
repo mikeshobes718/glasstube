@@ -39,6 +39,12 @@ if (!BUILD_LINE.test(html)) {
   console.error('stamp: index.html has no window.GLASSTUBE_BUILD line');
   process.exit(1);
 }
+// WP1 step 8: the HUD never shows an icon, and preloading one pushed cold
+// first paint past the 1 s budget on the glasses' link. Keep rel=icon only.
+if (/<link\b[^>]*\brel=["']?preload\b[^>]*\bicon-[^>]*>/i.test(html)) {
+  console.error('stamp: index.html preloads an icon; remove it (rel=icon is enough)');
+  process.exit(1);
+}
 
 const hashes = {};
 html = html.replace(REF, (all, head, path, _old) => {
