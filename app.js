@@ -2754,9 +2754,15 @@ function loadChannel(ch) {
   if (feedWait === ch.id) return;
   feedWait = ch.id;
   const gen = navGen;
+  // Only the row actually loading spins: a newer pick abandons the older one.
+  [].forEach.call(document.querySelectorAll('#list-items .is-loading'), rowLoaded);
   const row = rowLoading(ch.id);
   if (!row) setStatus('Loading ' + ch.name + '...');
-  function stale() { return feedWait !== ch.id || gen !== navGen; }
+  function stale() {
+    if (feedWait === ch.id && gen === navGen) return false;
+    rowLoaded(row);
+    return true;
+  }
   function attempt() {
     if (stale()) return;
     fetch('/api/feed?channel=' + encodeURIComponent(ch.id))
@@ -4468,11 +4474,18 @@ $('#btn-copy-debug').addEventListener('click', function () {
   // refuses writeText. Either way the wearer always gets a line back.
   function fallback() {
     const el = $('#debug-log');
+    // The textarea sits off screen: focus goes back where it was (the button)
+    // so the ring stays and the next pinch or arrow still works.
+    const back = document.activeElement;
     let done = false;
     if (el) {
       el.focus();
       el.select();
       try { done = !!document.execCommand('copy'); } catch (e) { done = false; }
+      el.setSelectionRange(0, 0);
+      el.blur();
+      const btn = back && back !== el && back !== document.body ? back : $('#btn-copy-debug');
+      if (btn && btn.focus) btn.focus();
     }
     if (done) ok();
     else say('Could not copy.');
