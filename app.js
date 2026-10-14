@@ -2705,7 +2705,9 @@ function restartVideo() {
   cancelUpNext();
   Player.seek(-1e7);
   const snap = Player.snapshot();
-  if (snap.paused || snap.ended) Player.toggle();
+  // Right after the rewind an ended or paused <video> reads as state -1 (time
+  // 0, not 'paused'), so test 'not playing'. toggle() only pauses state 1.
+  if (!snap.playing) Player.toggle();
   setPlayGate(false);
   updateChrome();
 }
