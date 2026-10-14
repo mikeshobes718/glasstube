@@ -3587,26 +3587,37 @@ function renderLibrary() {
 function openLibraryPlaylist(p) {
   const entry = {
     name: 'list', kind: 'libplaylist', videos: null, empty: 'Loading...',
+    failed: false,
     render: function () {
       if (entry.videos && entry.videos.length) showVideoList(p.name, entry.videos, 'libplaylist');
-      else renderList(p.name, [], entry.empty, 'libplaylist');
+      else renderList(p.name, [], entry.empty, 'libplaylist', entry.failed ? {
+        label: 'Try again',
+        onPick: () => { entry.failed = false; entry.videos = null; entry.empty = 'Loading...'; navRender(entry, false); load(); },
+      } : undefined);
     },
   };
   navTo(entry);
-  const gen = navGen;
-  authFetch('/api/yt/playlist?id=' + encodeURIComponent(p.id))
-    .then(d => {
-      if (gen !== navGen) return;
-      entry.videos = d.ok ? (d.videos || []) : [];
-      entry.empty = d.error || 'That playlist is empty.';
-      navRender(entry, false);
-    })
-    .catch(e => {
-      if (gen !== navGen) return;
-      entry.videos = [];
-      entry.empty = netText(e);
-      navRender(entry, false);
-    });
+  // A failure offers 'Try again' (WP3.4), as the Library screen does; it does
+  // not promise a retry that never comes.
+  function load() {
+    const gen = navGen;
+    authFetch('/api/yt/playlist?id=' + encodeURIComponent(p.id))
+      .then(d => {
+        if (gen !== navGen) return;
+        entry.videos = d.ok ? (d.videos || []) : [];
+        entry.failed = !d.ok;
+        entry.empty = d.error || 'That playlist is empty.';
+        navRender(entry, false);
+      })
+      .catch(e => {
+        if (gen !== navGen) return;
+        entry.videos = [];
+        entry.failed = true;
+        entry.empty = isNetErr(String((e && e.message) || e || '')) ? 'No internet.' : netText(e);
+        navRender(entry, false);
+      });
+  }
+  load();
 }
 
 function openSubs() {
@@ -4263,7 +4274,12 @@ function handlePlayerKey(e) {
   if (playerFault()) {
     // Final error: every action on screen is one gesture.
     if (k === 'pinch') openRelay();
-    else if (k === 'down' && queue.length > 1) openPlayer((queueIndex + 1) % queue.length, true);
+    else if (k === 'down') {
+      // Same rule that shows 'Swipe down: next video': forward only, never a
+      // video that already failed, and a pushed list never wraps.
+      const n = nextIndex(false);
+      if (n >= 0) openPlayer(n, true, resumeAt(queue[n] && queue[n].id));
+    }
     else if (k === 'left') leavePlayer();
     return;
   }

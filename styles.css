@@ -422,11 +422,17 @@ body.hud-player .errbar { display: none !important; }
   top: 88px;
   z-index: 30;
   width: 552px;
-  max-height: 72px;
+  /* Two whole lines at most, ending in an ellipsis: clipping the padded box
+     used to show the top of a third line. */
+  max-height: 56px;
   overflow: hidden;
-  padding: 8px 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  padding: 0;
   box-sizing: border-box;
   background: var(--bg);
+  box-shadow: 0 -8px 0 var(--bg), 0 8px 0 var(--bg);
   font-size: 22px;
   line-height: 28px;
   font-weight: 600;
