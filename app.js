@@ -3328,12 +3328,14 @@ function suggestFetch(q) {
 
 /* Opening Search from Home pushes a new nav entry and starts empty. Coming
    back to it from results is a nav-stack pop, which redraws the same entry:
-   that keeps the query and parks the cursor on the Search key. */
+   that keeps the query and parks the cursor on the Search key. With nothing
+   typed (back from a phone push, say) it starts fresh on A instead, where
+   Left still goes back and a pinch types. */
 function openSearch() {
   navTo({
     name: 'search',
     render: function (entry) {
-      const keep = !!entry.shown;
+      const keep = !!entry.shown && !!typed.trim();
       entry.shown = true;
       searchScreen(keep);
     },
