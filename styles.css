@@ -237,8 +237,10 @@ button { font-family: inherit; }
 }
 
 /* The status line is a nowrap flex item; without a cap it grows to its text
-   width and runs past the row, so its ellipsis never applies. */
-.list-home .menu-btn small { max-width: 100%; }
+   width and runs past the row, so its ellipsis never applies. It also takes
+   the full row width: fitText measures the element, and a shrink-to-fit line
+   measured narrower on every re-render until only a word or two was left. */
+.list-home .menu-btn small { max-width: 100%; width: 100%; box-sizing: border-box; }
 
 .list-settings .menu-btn {
   min-height: 64px;
