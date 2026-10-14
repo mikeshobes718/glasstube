@@ -673,14 +673,13 @@ body.hud-player .errbar { display: none !important; }
   padding: 0;
 }
 
+/* Every value is something to read back to someone: a long row wraps at a
+   word (or, for an unbroken URL or id, anywhere) rather than lose its end. */
 .debug-rows div {
   margin: 0 0 4px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
-
-.debug-rows div.debug-wrap { white-space: normal; }
 
 .debug-ok { color: var(--ok); }
 .debug-bad { color: var(--err); }
@@ -1004,9 +1003,11 @@ body.hud-player .errbar { display: none !important; }
   text-transform: uppercase;
 }
 
+/* The text is clipped at the 16px padding, not the box edge: start the fade
+   there so the sliced first letter is fully hidden, not drawn at half. */
 .kb-input.kb-long {
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 32px);
-  mask-image: linear-gradient(90deg, transparent, #000 32px);
+  -webkit-mask-image: linear-gradient(90deg, transparent 16px, #000 48px);
+  mask-image: linear-gradient(90deg, transparent 16px, #000 48px);
 }
 
 .kb-input::placeholder {

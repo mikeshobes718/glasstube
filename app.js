@@ -3098,6 +3098,10 @@ let suggestFor = '';
 let suggestList = [];
 let suggestTimer = 0;
 let suggestCtl = null;
+// An answer that came in while the cursor sat on the chips row: applying it
+// would swap the chip under the cursor for a different query, so it waits
+// until the cursor leaves the row.
+let suggestHeld = null;
 
 function keyGrid() {
   return KEY_ROWS.concat([KEY_ACTIONS.map(a => a.label)]);
@@ -3211,6 +3215,11 @@ function renderSearchChips(chips) {
 }
 
 function renderSearch() {
+  if (suggestHeld && keyRow !== KB_CHIP_ROW) {
+    const h = suggestHeld;
+    suggestHeld = null;
+    if (typed.trim().toLowerCase() === h.q) { suggestFor = h.q; suggestList = h.list; }
+  }
   if (!kbKeys || !kbKeys[0][0].isConnected) kbKeys = buildSearchGrid();
   if (!kbKeys) return;
   const chips = searchChips();
@@ -3359,6 +3368,7 @@ function searchFromInput(e) {
 }
 
 function suggestCancel() {
+  suggestHeld = null;
   clearTimeout(suggestTimer);
   suggestTimer = 0;
   if (suggestCtl) {
@@ -3372,6 +3382,14 @@ function suggestSchedule() {
   suggestCancel();
   if (q.length < 2 || q === suggestFor) return;
   suggestTimer = setTimeout(function () { suggestFetch(q); }, SUGGEST_DEBOUNCE_MS);
+}
+
+function suggestTake(q, list) {
+  if (keyRow === KB_CHIP_ROW) { suggestHeld = { q: q, list: list }; return; }
+  suggestHeld = null;
+  suggestFor = q;
+  suggestList = list;
+  renderSearch();
 }
 
 function suggestFetch(q) {
@@ -3389,20 +3407,16 @@ function suggestFetch(q) {
     .then(r => r.json())
     .then(d => {
       if (stale()) return;
-      suggestFor = q;
-      suggestList = d && d.ok && Array.isArray(d.suggestions)
+      suggestTake(q, d && d.ok && Array.isArray(d.suggestions)
         ? d.suggestions.filter(s => typeof s === 'string' && s.trim())
           .map(s => s.trim().slice(0, 80)).slice(0, 4)
-        : [];
-      renderSearch();
+        : []);
     })
     .catch(function () {
       // Timed out or offline: fall back to recents, silently. A newer
       // keystroke cancelling this request is not a failure.
       if (suggestCtl !== ctl || stale()) return;
-      suggestFor = q;
-      suggestList = [];
-      renderSearch();
+      suggestTake(q, []);
     })
     .then(function () {
       clearTimeout(killer);
@@ -4190,8 +4204,6 @@ function renderDebug() {
     // Never colour alone: a glyph says it too.
     const mark = row[2] === true ? '✓ ' : (row[2] === false ? '✗ ' : '');
     const ask = /\?$/.test(row[0]);
-    // A question row is an instruction: it wraps rather than lose its end.
-    if (ask) d.classList.add('debug-wrap');
     d.textContent = mark + row[0] + (ask ? ' ' : ': ') + row[1];
     rows.appendChild(d);
   });
