@@ -2881,11 +2881,14 @@ function menuAct(row) {
   }
 }
 
+/* Recents and Playlists read storage on every render, not once at open:
+   Back onto them after a play or a push shows what is stored now. entry.videos
+   follows, so navPopTo can still land on the row that was playing. */
 function openRecents() {
-  const list = recentsLoad();
   navTo({
-    name: 'list', kind: 'recents', videos: list,
-    render: function () {
+    name: 'list', kind: 'recents', videos: recentsLoad(),
+    render: function (entry) {
+      const list = entry.videos = recentsLoad();
       if (!list.length) {
         renderList('Recents', [], 'Nothing played yet. Send a link from your iPhone, or pick a channel.',
           'recents', { label: 'Open Channels', onPick: () => openChannels() });
@@ -2899,10 +2902,10 @@ function openRecents() {
 /* A saved playlist opens its contents (Play all plus the rows), the same as a
    channel does, instead of starting to play on the pinch. */
 function openPlaylists() {
-  const lists = playlistsLoad();
   navTo({
     name: 'list', kind: 'playlists',
     render: function () {
+      const lists = playlistsLoad();
       renderList('Playlists', lists.map(p => ({
         key: 'pl:' + p.name,
         count: true,
@@ -3582,10 +3585,10 @@ function openLibraryPlaylist(p) {
 }
 
 function openSubs() {
-  const subs = (library && library.subscriptions) || [];
   navTo({
     name: 'list', kind: 'subs',
     render: function () {
+      const subs = (library && library.subscriptions) || [];
       renderList('Subscriptions', subs.map(ch => ({
         key: ch.id,
         count: true,
