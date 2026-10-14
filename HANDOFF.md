@@ -6,7 +6,32 @@ Standing orders (do this every session):
 1. `git pull` (or `git pull gitlab main`) before you read or write this file.
 2. Read `## To other`. That is your job list.
 3. Do the work in this repo. Leave unrelated files alone.
-4. Edit only `## To Mac` and one line under `## Log`. Do not rewrite `## To other` except a short DONE line if needed.
+4. Edit only `## To Mac` and one line under `### HUD v2 on the Mac, 2026-10-14
+
+- **Live.** `npm run deploy` from a clean `hud-v2` worktree
+  (`~/Documents/glasstube-hud-v2`). Page, `/api/pair` and local stamp all say
+  build `12aa906d`. `node scripts/selftest.mjs` against production: every
+  check passes (1 expected skip, server-side resolve), including the browser
+  checks: HUD loads clean and plays the phone file route in 2.1 s.
+  `scripts/test-delivery.mjs` 50/50. `/api/suggest` and
+  `/.well-known/meta-wearables-manifest.json` answer.
+- **iOS.** Built and installed with `ios/install.sh` from the hud-v2 worktree:
+  first compile, no errors. This build has hud-v2's iOS code only, NOT the
+  uncommitted Berth account-sync work in `~/Documents/glasstube`.
+- **Backend is Berth**, app `glasstube` (`berth logs --app glasstube` shows the
+  live glasstube_poll/push/touch traffic and the WP6 probes 404ing).
+- **WP6 SQL rewritten, not run.** The draft would have broken WP6 itself:
+  `ack_seq` already exists and the live `glasstube_ack` writes it, so a 'got'
+  for push N landed on a row still saying 'playing' for N-1 and /api/push
+  would answer "Playing" for every later push (reproduced on a local copy of
+  the live schema). Also: Berth takes one statement per request (no
+  begin/commit), lookups now go through the live `glasstube_find` (trim +
+  expiry), no revoke/grant (live functions use default EXECUTE, and the
+  Supabase roles do not exist on Berth), and the rollback no longer drops the
+  live `ack_seq`. Run with `sh scripts/sql/run-berth.sh
+  scripts/sql/2026-10-delivery.sql` once Mike says yes.
+
+## Log`. Do not rewrite `## To other` except a short DONE line if needed.
 5. When done or blocked, write a clear status under `## To Mac` so Mac Cursor can tell Mike.
 6. Commit with a message like `handoff: ...` then `git push` the GitLab remote only. Never push origin/GitHub.
 7. No secrets, no PATs, no `.env` contents in this file.
@@ -114,6 +139,7 @@ Not verified, needs Mike wearing the glasses:
 If it still fails: Diagnostics on the glasses, Run self-test, Copy errors. The
 readout now names the page origin, the route chain, whether the phone sent a
 file, and whether the server can resolve anything today.
+2026-10-14 Mac: deployed hud-v2 (build 12aa906d) to production; selftest all pass; iOS WebScreen change built and installed (2.2 (35), hud-v2 code only); WP6 SQL corrected for Berth, not run yet. Details under To Mac.
 
 ### Follow-up, same day
 
