@@ -343,7 +343,9 @@ function pairBoot() {
   let link = linkStored();
   const url = pairUrlIgnored() ? '' : pairUrlRaw();
   if (url.length === 64 && url !== link) { link = url; code = ''; }
-  else if (url.length === 6 && url !== code) { code = url; link = ''; }
+  // A six character code is only a bootstrap: it fills in when no link token
+  // is stored, and never replaces (or erases) the durable token.
+  else if (url.length === 6 && url !== code && !link) code = url;
   pairCode = code;
   pairCodeStore(code);
   linkStore(link);
