@@ -1050,6 +1050,8 @@ function navSave() {
   top.focusIdx = i;
   const body = screens[current] && screens[current].querySelector('.screen-body');
   top.scrollTop = body ? body.scrollTop : 0;
+  // Search keeps its own cursor (nothing there holds DOM focus).
+  if (current === 'search') top.cursor = { row: keyRow, col: keyCol, x: keyX, chip: chipIdx };
 }
 
 function navRender(entry, restore) {
@@ -3430,25 +3432,32 @@ function suggestFetch(q) {
 }
 
 /* Opening Search from Home pushes a new nav entry and starts empty. Coming
-   back to it from results is a nav-stack pop, which redraws the same entry:
-   that keeps the query and parks the cursor on the Search key. With nothing
-   typed (back from a phone push, say) it starts fresh on A instead, where
-   Left still goes back and a pinch types. */
+   back to it from its own results is a nav-stack pop, which redraws the same
+   entry: that keeps the query and parks the cursor on the Search key. Back
+   from anything else stacked on it (a phone push, say) keeps the query and
+   puts the cursor back where the wearer left it. With nothing typed it starts
+   fresh on A, where Left still goes back and a pinch types. */
 function openSearch() {
   navTo({
     name: 'search',
     render: function (entry) {
       const keep = !!entry.shown && !!typed.trim();
+      const cursor = keep && !entry.ranSearch ? entry.cursor : null;
       entry.shown = true;
-      searchScreen(keep);
+      entry.ranSearch = false;
+      searchScreen(keep, cursor);
     },
   });
 }
 
-function searchScreen(keep) {
+function searchScreen(keep, cursor) {
   kbBlurInput();
   suggestCancel();
-  if (keep) {
+  if (keep && cursor) {
+    keyRow = cursor.row;
+    keyCol = cursor.col;
+    keyX = cursor.x;
+  } else if (keep) {
     keyRow = keyGrid().length - 1;
     keyCol = 0;
     keyX = 0.05;
@@ -3460,7 +3469,7 @@ function searchScreen(keep) {
     keyCol = 0;
     keyX = 0.05;
   }
-  chipIdx = 0;
+  chipIdx = keep && cursor ? (cursor.chip || 0) : 0;
   const input = kbInput();
   if (input && !keep) input.value = '';
   show('search');
@@ -3468,6 +3477,7 @@ function searchScreen(keep) {
   if (document.activeElement && document.activeElement !== document.body &&
       document.activeElement.blur) document.activeElement.blur();
   renderSearch();
+  if (keep && cursor && keyRow === KB_INPUT_ROW) kbFocusInput();
   if (keep) suggestSchedule();
 }
 
@@ -3480,6 +3490,8 @@ function runSearch() {
   suggestCancel();
   lastQuery = q;
   queriesAdd(q);
+  // Back from these results parks the cursor on the Search key (WP8.4).
+  if (navTop() && navTop().name === 'search') navTop().ranSearch = true;
   const entry = {
     name: 'list', kind: 'search', videos: null, empty: 'Searching...',
     render: function () {
