@@ -447,6 +447,7 @@ function show(name) {
   Object.keys(screens).forEach(k => {
     if (screens[k]) screens[k].classList.toggle('hidden', k !== name);
   });
+  fitPending(screens[name]);
   setStatus('');
   const bar = $('#errbar');
   if (bar && name === 'player') {
@@ -804,9 +805,9 @@ function renderContinue() {
   // Continue carries the queue too, so Home needs no separate Queue row.
   const n = (p.queue || []).length;
   if (sub) {
-    sub.textContent = n > 1
+    fitText([[sub, n > 1
       ? (p.listTitle || 'Queue') + ' · ' + (Math.min(p.queueIndex || 0, n - 1) + 1) + '/' + n + ' · ' + fmtTime(p.t)
-      : (p.title || 'Video') + ' · ' + fmtTime(p.t);
+      : (p.title || 'Video') + ' · ' + fmtTime(p.t), 1]]);
   }
 }
 
@@ -1201,6 +1202,86 @@ function queueTitle() {
    Back row. An empty list can offer one action row instead, which then has
    focus. Item fields used here: key (stable id for focus restore), video
    (a video row: default focus), count (counts toward the n/N in the title). */
+/* PLAN OVERFLOW: long text is cut at a word boundary with '…', not mid-word
+   by the CSS ellipsis. Done once at render (never per key) with canvas
+   measureText at the element's own computed font, one shared context. The
+   CSS clamp stays as the fallback and the full text goes in title. An
+   element with no width yet (its screen hidden) waits for show(). */
+let fitCtx = null;
+let fitFont = '';
+let fitSeen = new Map(); // word -> width at fitFont
+const ROW_FIT = { w: 0, font: '' };
+
+function fitWords(text, font, width, lines) {
+  if (!fitCtx) {
+    try { fitCtx = document.createElement('canvas').getContext('2d'); } catch (e) { fitCtx = null; }
+    if (!fitCtx) return text;
+  }
+  if (fitFont !== font || fitSeen.size > 4000) {
+    fitCtx.font = font;
+    fitFont = font;
+    fitSeen = new Map();
+  }
+  const m = t => {
+    let w = fitSeen.get(t);
+    if (w === undefined) { w = fitCtx.measureText(t).width; fitSeen.set(t, w); }
+    return w;
+  };
+  const words = text.split(/\s+/).filter(Boolean);
+  const gap = m(' ');
+  const max = width - 2; // canvas and layout can differ by a subpixel or so
+  let line = 1;
+  let x = 0;
+  let start = 0; // index in words of the first word on the current line
+  const ends = []; // x after each word on its line
+  for (let i = 0; i < words.length; i++) {
+    const w = m(words[i]);
+    const nx = x ? x + gap + w : w;
+    if (nx <= max) { x = nx; ends.push(x); continue; }
+    if (line < lines && x) { line++; start = i; x = w; ends.push(x); if (w <= max) continue; }
+    // Out of room: keep whole words and leave space for the ellipsis.
+    let n = Math.min(i, ends.length);
+    const ell = m('…');
+    while (n > start && ends[n - 1] + ell > max) n--;
+    if (n === 0) return text; // one word wider than the line: CSS cuts it
+    return words.slice(0, n).join(' ').replace(/[\s,;:·|\-–—]+$/, '') + '…';
+  }
+  return text;
+}
+
+/* slot, when given, is shared by elements that all lay out alike (video-row
+   titles): measured once, then reused so a list render forces no layout. */
+function fitText(jobs, slot) {
+  // Read every width and font first, then write: one layout, not one per row.
+  const read = jobs.filter(j => j && j[0]).map(j => {
+    const el = j[0];
+    let w = slot && slot.w;
+    let font = slot && slot.font;
+    if (!w) {
+      const cs = getComputedStyle(el);
+      w = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+      font = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+      if (slot && w > 0) { slot.w = w; slot.font = font; }
+    }
+    return { el: el, text: String(j[1] == null ? '' : j[1]), lines: j[2] || 1, w: w, font: font };
+  });
+  read.forEach(r => {
+    r.el._fitText = r.text;
+    r.el._fitLines = r.lines;
+    r.el._fitSlot = slot;
+    r.el.classList.toggle('fit-wait', !(r.w > 0));
+    const out = r.w > 0 ? fitWords(r.text, r.font, r.w, r.lines) : r.text;
+    if (r.el.textContent !== out) r.el.textContent = out;
+    if (out !== r.text) r.el.title = r.text;
+    else r.el.removeAttribute('title');
+  });
+}
+
+function fitPending(root) {
+  const els = root ? root.querySelectorAll('.fit-wait') : [];
+  [].forEach.call(els, el => fitText([[el, el._fitText, el._fitLines]], el._fitSlot));
+}
+
 function renderList(title, items, emptyText, kind, emptyAction) {
   listKind = kind || '';
   $('#list-title').textContent = title;
@@ -1221,6 +1302,7 @@ function renderList(title, items, emptyText, kind, emptyAction) {
     box.appendChild(p);
     if (emptyAction) items = [Object.assign({ key: 'empty-action' }, emptyAction)];
   }
+  const fits = [];
   if (items.length) {
     items.slice(0, MAX_LIST).forEach(item => {
       const btn = document.createElement('button');
@@ -1250,6 +1332,7 @@ function renderList(title, items, emptyText, kind, emptyAction) {
       const label = document.createElement('span');
       label.className = 'list-label';
       label.textContent = item.label;
+      if (item.thumb) fits.push([label, item.label, 2]);
       copy.appendChild(label);
       if (item.sub) {
         const sub = document.createElement('small');
@@ -1262,6 +1345,7 @@ function renderList(title, items, emptyText, kind, emptyAction) {
     });
     if (box.firstElementChild) thumbsNear(box.firstElementChild);
   }
+  fitText(fits, ROW_FIT);
   show('list');
   listCount();
 }
@@ -1960,7 +2044,8 @@ function renderMissed() {
   }
   const title = pushTitle(m);
   const sub = 'Sent ' + agoText(Date.now() - m.at) + ' · pinch to play';
-  if ($('#missed-title').textContent !== title) $('#missed-title').textContent = title;
+  const mt = $('#missed-title');
+  if (mt._fitText !== title || mt.classList.contains('fit-wait')) fitText([[mt, title, 1]]);
   if ($('#missed-sub').textContent !== sub) $('#missed-sub').textContent = sub;
 }
 
@@ -2932,6 +3017,7 @@ function renderSearchChips(chips) {
       b.addEventListener('click', () => { typed = text; runSearch(); });
       box.appendChild(b);
     });
+    fitText([].map.call(box.children, (b, i) => [b, labels[i], 1]));
   }
   box.classList.toggle('kb-suggest', chips.kind === 'suggest');
   if (chipIdx > chips.items.length - 1) chipIdx = Math.max(0, chips.items.length - 1);
