@@ -6,7 +6,8 @@ const GlassPrefs = (() => {
   const defaults = {
     captions: false,
     speed: 1,
-    repeat: 'all',
+    // Off by default: a list ends with 'Finished' instead of looping forever.
+    repeat: 'off',
     shuffle: false,
     audioOnly: false,
     sleep: 0,
@@ -31,7 +32,7 @@ const GlassPrefs = (() => {
   return {
     captions() { return !!data.captions; },
     speed() { return Number(data.speed) || 1; },
-    repeat() { return REPEATS.indexOf(data.repeat) >= 0 ? data.repeat : 'all'; },
+    repeat() { return REPEATS.indexOf(data.repeat) >= 0 ? data.repeat : 'off'; },
     shuffle() { return !!data.shuffle; },
     audioOnly() { return !!data.audioOnly; },
     sleep() { return Number(data.sleep) || 0; },
@@ -49,7 +50,7 @@ const GlassPrefs = (() => {
       return n === 1 ? '1x' : (String(n) + 'x');
     },
     repeatLabel() {
-      return { off: 'Off', one: 'One', all: 'All' }[this.repeat()] || 'All';
+      return { off: 'Off', one: 'One', all: 'All' }[this.repeat()] || 'Off';
     },
     sleepLabel() {
       const n = this.sleep();

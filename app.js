@@ -17,10 +17,39 @@ const DEFAULT_CHANNELS = [
   { name: 'MKBHD', id: 'UCBJycsmduvYEL83R_U4JriQ' },
 ];
 
+/* Rows rendered at once. Longer lists page in place ('More' / 'Earlier'
+   rows), so every row stays reachable without building hundreds of rows on
+   the glasses' slow CPU. */
 const MAX_LIST = 40;
 const CHANNEL_PAGE = 8;
 const MAX_RECENTS = 24;
-const PAIR_POLL_MS = 2000;
+/* Pairing poll (WP1). One request in flight at a time, each aborted after
+   POLL_TIMEOUT_MS. The gap follows the wearer: fast while they are active or
+   on From iPhone, slower when idle, slow but never stopped when the page says
+   it is hidden (whether the glasses report hidden truthfully is unverified). */
+const POLL_ACTIVE_MS = 2000;
+const POLL_IDLE_MS = 5000;
+const POLL_HIDDEN_MS = 15000;
+const POLL_TIMEOUT_MS = 8000;
+const POLL_BACKOFF_MS = [2000, 4000, 8000, 15000];
+const POLL_NOW_MS = 100;
+const POLL_FRESH_MS = 1000;
+const ACTIVE_WINDOW_MS = 180000;
+const WATCHDOG_MS = 10000;
+const WATCHDOG_STALL_MS = 30000;
+/* A link is wiped only after GONE_STRIKES dead answers spanning GONE_SPAN_MS. */
+const GONE_STRIKES = 3;
+const GONE_SPAN_MS = 30000;
+/* Self-update: reload into a new deploy only on idle Home or on resume. */
+const UPDATE_IDLE_MS = 20000;
+const UPDATE_PUSH_QUIET_MS = 60000;
+const UPDATE_RETRY_MS = 10 * 60 * 1000;
+const UPDATE_CHECK_MS = 5000;
+const RELOADED_FOR_KEY = 'glasstube.reloadedFor';
+const UPDATED_FROM_KEY = 'glasstube.updatedFrom';
+const BUILD_CHIP_MS = 3000;
+const UNLINK_ARM_MS = 4000;
+const PAIR_NEW_LABEL = 'Link a different phone';
 const RETRY_MS = 3000;
 const PUSH_FRESH_MS = 10 * 60 * 1000;
 const ROUTE_KEY = 'glasstube.route';
@@ -31,6 +60,8 @@ const PLAYLISTS_KEY = 'glasstube.playlists';
 const PROGRESS_KEY = 'glasstube.progress';
 const CHANNELS_KEY = 'glasstube.channels';
 const SESSION_KEY = 'glasstube.session';
+// When the running sleep timer ends (ms), so a reload resumes it, not restarts it.
+const SLEEP_UNTIL_KEY = 'glasstube.sleepUntil';
 const MARKS_KEY = 'glasstube.marks';
 const QUERIES_KEY = 'glasstube.queries';
 /* A video counts as finished, not resumable, this close to the end. */
@@ -53,14 +84,13 @@ const screens = {
 };
 
 let current = 'home';
-let listBack = null;
 let queue = [];
 let queueIndex = -1;
 let pairCode = '';
 let pairLink = '';
 let pairTimer = null;
 let pairLastSeq = -1;
-let pairPolls = 0;
+let pairReplaces = ''; // WP6: link token a fresh mint replaces
 let pairMintTimer = 0;
 let pairState = 'not paired';
 let feedHealth = 'not called yet';
@@ -75,16 +105,45 @@ let skipIds = {};
 let playFails = [];
 let blockedFor = '';
 let needGesture = false;
+// WP5: one counter per openPlayer call; every player timer checks it.
+let openSeq = 0;
+let stallWatch = 0;
+let proxyDemoted = false;
+let routeSaved = '';
+let progressAt = 0;
+let loadText = '';
+// Phone files by video id, in memory only: { u, exp }. Never persisted.
+const fileFor = {};
 let sleepUntil = 0;
 let sleepWatch = 0;
 let channelPage = 0;
 let listKind = '';
-let prefetched = {};
 let ytSession = '';
 let library = null;
 let libraryErr = '';
 let lastQuery = '';
 let phoneApp = '';
+/* Poll loop and self-update state (WP1). lastKeyAt and lastActiveAt are the
+   shared activity clocks: any keydown, becoming visible and an applied push
+   move them. */
+let pollBusy = false;
+let pollAgain = false;
+let pollDueAt = 0;
+let pollStartedAt = 0;
+let pollCtrl = null;
+let pollFails = 0;
+let lastPoll = { at: 0, ok: false, text: 'not yet' };
+let lastActiveAt = Date.now();
+let lastKeyAt = Date.now();
+let lastPushAt = 0;
+let goneStrikes = 0;
+let goneFirstAt = 0;
+let pairSeqKey = '';
+let serverBuild = '';
+let updatePending = '';
+let updatedFrom = '';
+let unlinkArmed = 0;
+const instanceId = (Math.random().toString(36) + '000000').slice(2, 8);
 
 function report(text) {
   if (window.glasstubeReport) window.glasstubeReport(text);
@@ -133,13 +192,22 @@ function recentsSave(list) {
   catch (e) { /* private mode */ }
 }
 
+/* List rows are 160x90, so the 320x180 mqdefault is all they need. The larger
+   hq, sd and maxres images cost several times the bytes on a slow link. */
+function mqThumb(url, id) {
+  const u = String(url || '');
+  if (!u) return id ? 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg' : '';
+  const m = u.match(/^(https?:\/\/i\d?\.ytimg\.com\/vi(?:_webp)?\/[^/?#]+\/)(?:hqdefault|sddefault|maxresdefault|hq720)\.(jpg|webp)(?:[?#].*)?$/);
+  return m ? m[1] + 'mqdefault.' + m[2] : u;
+}
+
 function recentsAdd(video) {
   const next = recentsLoad().filter(v => v && v.id !== video.id);
   next.unshift({
     id: video.id,
     title: video.title || 'YouTube video',
     channel: video.channel || '',
-    thumb: video.thumb || ('https://i.ytimg.com/vi/' + video.id + '/hqdefault.jpg'),
+    thumb: mqThumb(video.thumb, video.id),
   });
   recentsSave(next);
 }
@@ -168,6 +236,9 @@ function markSet(id, t, duration) {
 
 function resumeAt(id) {
   const m = marksLoad()[id];
+  // Leaving a video in its first seconds stores no mark, but 'Resume' on the
+  // row it lands on must still pick up where the wearer left (WP7).
+  if (exitPoint && exitPoint.id === id && (!m || (m.at || 0) <= exitPoint.at)) return exitPoint.t;
   return (m && m.t) || 0;
 }
 
@@ -208,9 +279,109 @@ function queriesAdd(q) {
   try { localStorage.setItem(QUERIES_KEY, JSON.stringify(next)); } catch (e) { /* private mode */ }
 }
 
-function pairCodeStored() {
-  try { return localStorage.getItem(PAIR_KEY) || ''; }
+/* WP4: durable pairing. The key is written everywhere: localStorage plus a
+   year-long cookie, and a launch URL may carry it as ?pair=, so a storage
+   wipe on the glasses no longer drops the phone. Read order: URL, then
+   localStorage, then the cookie. Unlinking while the launch URL still carries
+   the old key marks that key ignored, or it would come back on the next
+   launch and quietly move the glasses off the phone's pairing. */
+const PAIR_RE = /^[A-Z0-9]{6}$|^[a-f0-9]{64}$/i;
+const PAIR_COOKIE = 'glasstube_pair';
+const IGNORE_PAIR_KEY = 'glasstube.ignoreUrlPair';
+const IGNORE_PAIR_COOKIE = 'glasstube_ignore_pair';
+const LINKED_KEY = 'glasstube.linked';
+const TOUCH_KEY = 'glasstube.lastTouchAt';
+const TOUCH_EVERY_MS = 6 * 60 * 60 * 1000;
+let pairPaired = false;
+let pairTouchAt = 0;
+
+function lsGet(k) {
+  try { return localStorage.getItem(k) || ''; }
   catch (e) { return ''; }
+}
+
+function pairNorm(v) {
+  const t = String(v || '').trim();
+  if (!PAIR_RE.test(t)) return '';
+  return t.length === 6 ? t.toUpperCase() : t.toLowerCase();
+}
+
+function cookieGet(name) {
+  try {
+    const m = String(document.cookie || '').match(new RegExp('(?:^|;\\s*)' + name + '=([^;]*)'));
+    return m ? decodeURIComponent(m[1]) : '';
+  } catch (e) { return ''; }
+}
+
+function cookieSet(name, value) {
+  try {
+    document.cookie = name + '=' + encodeURIComponent(value || '') +
+      '; Max-Age=' + (value ? 31536000 : 0) + '; Path=/; SameSite=Lax' +
+      (location.protocol === 'https:' ? '; Secure' : '');
+  } catch (e) { /* cookies off */ }
+}
+
+function pairUrlRaw() {
+  try { return pairNorm(new URLSearchParams(location.search).get('pair')); }
+  catch (e) { return ''; }
+}
+
+function pairUrlIgnored() {
+  const raw = pairUrlRaw();
+  return !!raw && raw === pairNorm(lsGet(IGNORE_PAIR_KEY) || cookieGet(IGNORE_PAIR_COOKIE));
+}
+
+/* Every deliberate unlink, and a pairing the server says is gone. */
+function pairIgnoreUrl() {
+  const raw = pairUrlRaw();
+  if (!raw) return;
+  try { localStorage.setItem(IGNORE_PAIR_KEY, raw); } catch (e) { /* optional */ }
+  cookieSet(IGNORE_PAIR_COOKIE, raw);
+}
+
+/* Once at boot: pick the key by the read order, then write it back to every
+   store so they stay in step. */
+function pairBoot() {
+  let code = pairCodeStored();
+  let link = linkStored();
+  const url = pairUrlIgnored() ? '' : pairUrlRaw();
+  if (url.length === 64 && url !== link) { link = url; code = ''; }
+  // A six character code is only a bootstrap: it fills in when no link token
+  // is stored, and never replaces (or erases) the durable token.
+  else if (url.length === 6 && url !== code && !link) code = url;
+  pairCode = code;
+  pairCodeStore(code);
+  linkStore(link);
+  pairPaired = !!link && lsGet(LINKED_KEY) === '1';
+}
+
+/* The last poll said a phone has claimed this pair. Kept across reloads so
+   the Home chip does not flash 'Not linked' at every launch. */
+function pairPairedSet(v) {
+  if (!!v === pairPaired) return;
+  pairPaired = !!v;
+  try { localStorage.setItem(LINKED_KEY, pairPaired ? '1' : '0'); } catch (e) { /* optional */ }
+}
+
+/* Keepalive only for a pair a phone already claimed, at most every 6h. The
+   old every-8th-poll touch is what marked a fresh, untyped code 'paired'. */
+function pairTouchMaybe() {
+  const last = Math.max(pairTouchAt, Number(lsGet(TOUCH_KEY)) || 0);
+  if (Date.now() - last < TOUCH_EVERY_MS) return;
+  pairTouchAt = Date.now();
+  try { localStorage.setItem(TOUCH_KEY, String(pairTouchAt)); } catch (e) { /* optional */ }
+  fetch('/api/pair', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: pairKey(), touch: true }),
+  }).catch(() => {});
+}
+
+function pairCodeStored() {
+  const c = lsGet(PAIR_KEY);
+  if (c) return c;
+  const k = pairNorm(cookieGet(PAIR_COOKIE));
+  return k.length === 6 ? k : '';
 }
 
 function pairCodeStore(c) {
@@ -218,6 +389,17 @@ function pairCodeStore(c) {
     if (c) localStorage.setItem(PAIR_KEY, c);
     else localStorage.removeItem(PAIR_KEY);
   } catch (e) { /* optional */ }
+  cookieSet(PAIR_COOKIE, pairLink || c);
+  pairKeyChanged();
+}
+
+/* destSeq belongs to one pairing key. When the key changes, the last seq seen
+   under the old key means nothing, so the next push is judged afresh. */
+function pairKeyChanged() {
+  const k = pairKey();
+  if (k === pairSeqKey) return;
+  pairSeqKey = k;
+  pairLastSeq = -1;
 }
 
 /* The six character code is a bootstrap and expires on purpose. The link token
@@ -225,8 +407,10 @@ function pairCodeStore(c) {
    time either device spoke. Talking to the server with the token is what stops
    the phone asking for a code again every time it reopens. */
 function linkStored() {
-  try { return localStorage.getItem(LINK_KEY) || ''; }
-  catch (e) { return ''; }
+  const t = lsGet(LINK_KEY);
+  if (t) return t;
+  const k = pairNorm(cookieGet(PAIR_COOKIE));
+  return k.length === 64 ? k : '';
 }
 
 function linkStore(t) {
@@ -235,14 +419,30 @@ function linkStore(t) {
     if (pairLink) localStorage.setItem(LINK_KEY, pairLink);
     else localStorage.removeItem(LINK_KEY);
   } catch (e) { /* optional */ }
+  cookieSet(PAIR_COOKIE, pairLink || pairCodeStored());
+  pairKeyChanged();
 }
 
 function pairKey() {
   return pairLink || pairCode;
 }
 
+/* Screens that Left (or the system Back) leaves. They show the '◀ Back'
+   footer in place of the old focusable Back rows. Search is not one: there
+   Left moves the letter cursor. */
+const FOOT_SCREENS = { list: 1, phone: 1, settings: 1, debug: 1 };
+
 function show(name) {
+  // Home is only ever the root of the nav stack. A plain show('home') from
+  // anywhere (sleep timer, older callers) pops the whole stack instead of
+  // leaving entries that Back would walk into later.
+  if (name === 'home' && !navRendering && navStack.length > 1) {
+    navRoot();
+    return;
+  }
   if (current === 'player' && name !== 'player') {
+    noteExit();
+    playerUiReset();
     progressSave();
     if (typeof Player !== 'undefined') Player.destroy();
     nowPlaying = null;
@@ -252,13 +452,19 @@ function show(name) {
   Object.keys(screens).forEach(k => {
     if (screens[k]) screens[k].classList.toggle('hidden', k !== name);
   });
+  fitPending(screens[name]);
+  if (name === 'home') homeFit();
   setStatus('');
   const bar = $('#errbar');
   if (bar && name === 'player') {
     bar.classList.add('hidden');
     bar.textContent = '';
   }
-  if (name !== 'player') focusFirst();
+  const foot = $('#nav-foot');
+  if (foot) foot.classList.toggle('hidden', !FOOT_SCREENS[name]);
+  document.body.classList.toggle('has-foot', !!FOOT_SCREENS[name]);
+  if (name !== 'player') syncFades();
+  if (name !== 'player') focusDefault();
 }
 
 function focusables() {
@@ -270,11 +476,69 @@ function focusables() {
 }
 
 /* Lists are no longer capped at six rows, so the focused row has to be walked
-   into view or the band scrolls into nothing the wearer can see. */
+   into view or the band scrolls into nothing the wearer can see. It is kept
+   centred (block 'center'), never parked on the bottom edge. The target is
+   computed against the row's own scroll body rather than with scrollIntoView,
+   which would also try to scroll the stage, and so the edge fades can be set
+   for where the scroll will end, not where a smooth scroll happens to be. */
 function reveal(el) {
-  if (!el || !el.scrollIntoView) return;
-  try { el.scrollIntoView({ block: 'nearest' }); }
-  catch (e) { el.scrollIntoView(false); }
+  if (!el) return;
+  const body = el.closest ? el.closest('.screen-body') : null;
+  if (!body || el.offsetParent !== body) {
+    if (!el.scrollIntoView) return;
+    try { el.scrollIntoView({ block: 'center' }); }
+    catch (e) { el.scrollIntoView(false); }
+    return;
+  }
+  const max = Math.max(0, body.scrollHeight - body.clientHeight);
+  const top = Math.max(0, Math.min(max,
+    Math.round(el.offsetTop - (body.clientHeight - el.offsetHeight) / 2)));
+  if (Math.abs(body.scrollTop - top) > 1) body.scrollTo({ top: top });
+  updateFades(body, top);
+  thumbsNear(el);
+}
+
+/* The 32px edge fades show only while content continues past that edge. */
+function updateFades(body, top) {
+  if (!body) return;
+  const t = top == null ? body.scrollTop : top;
+  const max = body.scrollHeight - body.clientHeight;
+  body.classList.toggle('fade-top', t > 1);
+  body.classList.toggle('fade-bottom', t < max - 1);
+}
+
+function syncFades() {
+  const scr = screens[current];
+  if (!scr) return;
+  scr.querySelectorAll('.screen-body').forEach(function (b) { updateFades(b); });
+}
+
+// Re-check the fades once any scroll settles (one call per scroll, not per
+// frame), for scrolls that reveal() did not start.
+document.querySelectorAll('.screen-body').forEach(function (b) {
+  if ('onscrollend' in window) {
+    b.addEventListener('scrollend', function () { updateFades(b); }, { passive: true });
+    return;
+  }
+  let settle = 0;
+  b.addEventListener('scroll', function () {
+    clearTimeout(settle);
+    settle = setTimeout(function () { updateFades(b); }, 150);
+  }, { passive: true });
+});
+
+/* Thumbnails carry data-src and only rows within 6 of focus get a real src,
+   so a 40-row list does not pull 40 images over the glasses' slow link. */
+function thumbsNear(el, span) {
+  const box = el && el.parentElement;
+  if (!box) return;
+  const rows = box.children;
+  const idx = Math.max(0, Array.prototype.indexOf.call(rows, el));
+  const n = span == null ? 6 : span;
+  for (let i = Math.max(0, idx - n); i <= Math.min(rows.length - 1, idx + n); i++) {
+    const img = rows[i].querySelector('img[data-src]');
+    if (img && !img.getAttribute('src')) img.src = img.dataset.src;
+  }
 }
 
 function focusFirst() {
@@ -285,6 +549,33 @@ function focusFirst() {
   } else if (document.activeElement && document.activeElement.blur) {
     document.activeElement.blur();
   }
+}
+
+/* Where a screen puts focus when it opens fresh. Lists start on the first
+   video row (Play all stays above it, one Up away). From iPhone starts with
+   nothing focused, so a stray pinch there can never unlink the phone. */
+function focusDefault() {
+  if (current === 'phone') {
+    const a = document.activeElement;
+    if (a && a !== document.body && a.blur) a.blur();
+    return;
+  }
+  if (current === 'list') {
+    const v = screens.list.querySelector('#list-items [data-video]');
+    if (v && v.offsetParent !== null) {
+      v.focus();
+      reveal(v);
+      return;
+    }
+  }
+  focusFirst();
+}
+
+/* The stable identity of a row, so focus survives the list being rebuilt:
+   a video id, a channel id, a home data-menu, or the element id. */
+function focusKeyOf(el) {
+  if (!el || !el.getAttribute) return '';
+  return el.getAttribute('data-key') || el.getAttribute('data-menu') || el.id || '';
 }
 
 function moveFocus(dir) {
@@ -299,9 +590,28 @@ function moveFocus(dir) {
   reveal(f[next]);
 }
 
+/* Right in a list: jump n rows, clamped at the ends, never wrapping. */
+function moveFocusBy(n) {
+  const f = focusables();
+  if (!f.length) return;
+  const idx = f.indexOf(document.activeElement);
+  const next = idx < 0 ? 0 : Math.max(0, Math.min(f.length - 1, idx + n));
+  f[next].focus();
+  reveal(f[next]);
+}
+
+/* Pinch feedback: a 120ms press on whatever the pinch landed on. */
+function pulse(el) {
+  if (!el || !el.classList) return;
+  el.classList.add('pressed');
+  clearTimeout(el.pressTimer);
+  el.pressTimer = setTimeout(function () { el.classList.remove('pressed'); }, 120);
+}
+
 function activateFocused() {
   const el = document.activeElement;
   if (!el || !el.classList || !el.classList.contains('focusable')) return;
+  pulse(el);
   el.click();
 }
 
@@ -310,6 +620,56 @@ function setStatus(msg, isErr) {
   el.textContent = msg || '';
   el.classList.toggle('hidden', !msg);
   el.classList.toggle('status-err', !!isErr);
+}
+
+/* One short message in the toast lane (y 500-548). kind 'ok', 'err' or 'info'
+   picks the leading glyph (✓ ! ↓); CSS draws it, so textContent stays exactly
+   the text. #toast sits outside the screens, so show() and route retries never
+   clear it. Hides itself after ms (default 4s). */
+let toastTimer = 0;
+let toastFade = 0;
+
+function showToast(text, kind, ms) {
+  const el = $('#toast');
+  if (!el) return;
+  if (!text) { hideToast(true); return; }
+  clearTimeout(toastTimer);
+  clearTimeout(toastFade);
+  const k = (kind === 'ok' || kind === 'err') ? kind : 'info';
+  el.textContent = String(text);
+  el.className = 'toast toast-' + k;
+  toastRoom(el);
+  toastTimer = setTimeout(hideToast, ms > 0 ? ms : 4000);
+}
+
+/* Home has no footer, so its last row can sit in the toast lane. While a
+   toast is up, Home's scroll body ends 4px above the toast's real top (one or
+   two lines) and a focused row it would cover is walked back above it. */
+function toastRoom(el) {
+  const up = !!el && !el.classList.contains('hidden');
+  document.body.classList.toggle('toast-up', up);
+  if (up) document.body.style.setProperty('--toast-room', (52 + el.offsetHeight + 4) + 'px');
+  if (current === 'home') homeFit();
+  if (!up) return;
+  const f = document.activeElement;
+  if (current !== 'home' || !f || !f.closest || !f.closest('#screen-home .screen-body')) return;
+  if (f.getBoundingClientRect().bottom + 4 > el.getBoundingClientRect().top) reveal(f);
+}
+
+function hideToast(now) {
+  const el = $('#toast');
+  if (!el) return;
+  clearTimeout(toastTimer);
+  clearTimeout(toastFade);
+  toastTimer = 0;
+  const done = function () {
+    el.className = 'toast hidden';
+    el.textContent = '';
+    toastRoom(null);
+  };
+  if (now === true || el.classList.contains('hidden')) { done(); return; }
+  el.classList.add('toast-out');
+  toastFade = setTimeout(done, 260);
 }
 
 function isNetErr(e) {
@@ -323,10 +683,43 @@ function netText(e) {
   return s;
 }
 
+/* WP4: one failed poll is not 'offline'. Two in a row are, or the OS saying
+   so. In the player the text is a toast, never the full-width bar, and it
+   clears the moment a request gets through, playing or not. pollFails (WP1,
+   declared with the poll loop state) is the one failure counter: it drives
+   both the backoff and this threshold. */
+
+function offlineText() {
+  return navigator.onLine === false ? 'No internet' : 'Can\'t reach GlassTube · retrying';
+}
+
+function isOfflineText(t) {
+  return /No internet|Can't reach GlassTube/i.test(String(t || ''));
+}
+
 function setOffline(on) {
+  const was = netOffline;
   netOffline = !!on;
-  if (on) setStatus('No internet. Retrying...', true);
-  else if (!nowPlaying) setStatus('');
+  if (on) {
+    if (current === 'player') showToast(offlineText(), 'err', 16000);
+    else setStatus(offlineText(), true);
+  } else {
+    const st = $('#status');
+    if (st && isOfflineText(st.textContent)) setStatus('');
+    const t = $('#toast');
+    if (t && isOfflineText(t.textContent)) showToast('');
+  }
+  if (was !== netOffline) updateHomePhoneHint();
+}
+
+function netFail() {
+  pollFails += 1;
+  if (pollFails >= 2 || navigator.onLine === false) setOffline(true);
+}
+
+function netOk() {
+  pollFails = 0;
+  setOffline(false);
 }
 
 function renderSound() {
@@ -341,7 +734,7 @@ function renderSettings() {
   renderSound();
   if ($('#captions-state')) $('#captions-state').textContent = prefs ? yn(prefs.captions()) : 'Off';
   if ($('#speed-state')) $('#speed-state').textContent = prefs ? prefs.speedLabel() : '1x';
-  if ($('#repeat-state')) $('#repeat-state').textContent = prefs ? prefs.repeatLabel() : 'All';
+  if ($('#repeat-state')) $('#repeat-state').textContent = prefs ? prefs.repeatLabel() : 'Off';
   if ($('#shuffle-state')) $('#shuffle-state').textContent = prefs ? yn(prefs.shuffle()) : 'Off';
   if ($('#picture-state')) $('#picture-state').textContent = (prefs && prefs.audioOnly()) ? 'Audio only' : 'Video';
   if ($('#sleep-state')) {
@@ -364,6 +757,7 @@ function progressLoad() {
 
 function progressSave() {
   if (!nowPlaying || typeof Player === 'undefined') return;
+  progressAt = Date.now();
   const snap = Player.snapshot();
   if (snap.duration && snap.time > 1) markSet(nowPlaying.id, snap.time, snap.duration);
   if (!snap.duration || snap.time < 5) return;
@@ -391,6 +785,13 @@ function progressSave() {
   renderContinue();
 }
 
+/* While playing, at most one save every 10s. Pause, ended, exit, hidden and
+   pagehide save at once through progressSave(). */
+function progressTick() {
+  if (Date.now() - progressAt < 10000) return;
+  progressSave();
+}
+
 function progressClear() {
   try { localStorage.removeItem(PROGRESS_KEY); } catch (e) {}
   renderContinue();
@@ -402,24 +803,33 @@ function renderContinue() {
   if (!btn) return;
   const p = progressLoad();
   if (!p) {
+    const had = document.activeElement === btn;
     btn.classList.add('hidden');
+    homeFit();
+    if (had) homeRefocus(btn);
     return;
   }
   btn.classList.remove('hidden');
-  if (sub) sub.textContent = (p.title || 'Video') + ' · ' + fmtTime(p.t);
+  homeFit();
+  // Continue carries the queue too, so Home needs no separate Queue row.
+  const n = (p.queue || []).length;
+  if (sub) {
+    fitText([[sub, n > 1
+      ? (p.listTitle || 'Queue') + ' · ' + (Math.min(p.queueIndex || 0, n - 1) + 1) + '/' + n + ' · ' + fmtTime(p.t)
+      : (p.title || 'Video') + ' · ' + fmtTime(p.t), 1]]);
+  }
 }
 
 function openContinue() {
   const p = progressLoad();
   if (!p) return;
   skipIds = {};
-  prefetched = {};
   if (p.queue && p.queue.length) {
     queue = p.queue.map(v => Object.assign({}, v, { _listTitle: p.listTitle || 'Continue' }));
-    openPlayer(Math.min(p.queueIndex || 0, queue.length - 1), true, p.t);
+    navPlayer(Math.min(p.queueIndex || 0, queue.length - 1), p.t);
   } else {
     queue = [Object.assign({}, p, { _listTitle: 'Continue' })];
-    openPlayer(0, true, p.t);
+    navPlayer(0, p.t);
   }
 }
 
@@ -439,9 +849,19 @@ function maybeShuffle(videos) {
   return videos;
 }
 
-function armSleep() {
+/* Starts the timer the wearer just picked. With resume (page load), only the
+   deadline already saved counts: a timer that has run out, or none saved, goes
+   back to Off instead of starting a fresh one. */
+function armSleep(resume) {
   const mins = prefs ? prefs.sleep() : 0;
-  sleepUntil = mins ? Date.now() + mins * 60000 : 0;
+  let saved = 0;
+  try { saved = Number(localStorage.getItem(SLEEP_UNTIL_KEY)) || 0; } catch (e) { /* private mode */ }
+  sleepUntil = !mins ? 0 : resume ? (saved > Date.now() ? saved : 0) : Date.now() + mins * 60000;
+  if (mins && !sleepUntil && prefs) prefs.setSleep(0);
+  try {
+    if (sleepUntil) localStorage.setItem(SLEEP_UNTIL_KEY, String(sleepUntil));
+    else localStorage.removeItem(SLEEP_UNTIL_KEY);
+  } catch (e) { /* private mode */ }
   if (sleepWatch) clearInterval(sleepWatch);
   sleepWatch = 0;
   if (!sleepUntil) {
@@ -454,6 +874,10 @@ function armSleep() {
       sleepUntil = 0;
       if (sleepWatch) clearInterval(sleepWatch);
       sleepWatch = 0;
+      // Once fired, sleep is Off everywhere: settings, the player menu, reload.
+      if (prefs) prefs.setSleep(0);
+      try { localStorage.removeItem(SLEEP_UNTIL_KEY); } catch (e) { /* private mode */ }
+      if (menuIsOpen()) renderPlayerMenu();
       if (typeof Player !== 'undefined' && Player.pause) Player.pause();
       show('home');
       setStatus('Sleep timer ended.', false);
@@ -484,46 +908,346 @@ function playlistRemember(name, videos) {
       id: v.id,
       title: v.title || 'YouTube video',
       channel: v.channel || '',
-      thumb: v.thumb || ('https://i.ytimg.com/vi/' + v.id + '/hqdefault.jpg'),
+      thumb: mqThumb(v.thumb, v.id),
     })),
   });
   playlistsSave(next);
 }
 
+/* WP4: Home tells the truth about the link: a chip in the header and the
+   From iPhone row's second line. Linked means a link token is held and the
+   last poll said a phone claimed it. */
+function pairLinked() {
+  return !!pairLink && pairPaired;
+}
+
 function updateHomePhoneHint() {
   const el = document.querySelector('[data-menu="phone"] small');
-  if (!el) return;
-  if (pairCode) el.textContent = 'Code ' + pairCode + ' · listening';
-  else el.textContent = 'Paste a YouTube link on your iPhone';
+  const chip = $('#link-chip');
+  const linked = pairLinked();
+  if (el) {
+    let t = 'Getting a code…';
+    if (netOffline) t = offlineText();
+    else if (linked && lastPushInfo) t = 'iPhone linked · last video ' + agoText(Date.now() - lastPushInfo.at);
+    else if (linked) t = 'iPhone linked';
+    else if (pairCode) t = 'Code ' + pairCode + ' · waiting for iPhone';
+    if (el.textContent !== t) el.textContent = t;
+  }
+  if (!chip) return;
+  const state = netOffline ? 'err' : (linked ? 'on' : 'off');
+  if (chip.dataset.state === state) return;
+  chip.dataset.state = state;
+  chip.className = 'link-chip link-' + state;
+  const dot = document.createElement('span');
+  dot.className = 'chip-dot';
+  dot.textContent = { on: '●', off: '○', err: '!' }[state];
+  chip.textContent = '';
+  chip.appendChild(dot);
+  chip.appendChild(document.createTextNode({ on: ' Linked', off: ' Not linked', err: ' Offline' }[state]));
 }
 
 function renderHome() {
+  const had = current === 'home' ? document.activeElement : null;
   updateHomePhoneHint();
+  renderMissed();
   renderContinue();
   const lib = document.querySelector('[data-menu="library"]');
   if (lib) lib.classList.toggle('hidden', !ytSession);
   const sub = document.querySelector('[data-menu="library"] small');
   if (sub) sub.textContent = 'Subscriptions, playlists, liked';
-  const q = document.querySelector('[data-menu="queue"]');
-  if (q) q.classList.toggle('hidden', queue.length < 2);
-  const qs = document.querySelector('[data-menu="queue"] small');
-  if (qs && queue.length > 1) qs.textContent = queue.length + ' videos · ' + queueTitle();
+  homeFit();
+  homeRefocus(had);
 }
 
-function goBack() {
-  if (current === 'list' && listBack) { listBack(); return; }
-  if (current === 'player') {
-    progressSave();
-    if (typeof Player !== 'undefined') Player.destroy();
-    nowPlaying = null;
-    if (queue.length && queueTitle() !== 'From iPhone' && queueTitle() !== 'From phone') {
-      showVideoList(queueTitle(), queue, listBack || (() => show('home')));
-      return;
+/* Home fits one screen (y 88-552). With an optional row (Missed, Continue,
+   Library) showing, From iPhone drops its second line (the header chip still
+   shows the link) so every row fits. With two, Home scrolls: its scroll body
+   then ends on a whole row plus the gap, so the first paint never cuts a row
+   at the fold and the bottom fade still signals more. */
+function homeFit() {
+  const body = document.querySelector('#screen-home .list-home');
+  if (!body) return;
+  const extra = ['#btn-missed', '#btn-continue', '[data-menu="library"]'].some(function (s) {
+    const b = body.querySelector(s);
+    return !!b && !b.classList.contains('hidden');
+  });
+  body.classList.toggle('home-tight', extra);
+  const scr = body.offsetParent;
+  if (current !== 'home' || !scr) return;
+  // The height the body would get uncapped (it is the screen's last flex
+  // item), read without un-capping it, so a scrolled Home keeps its place.
+  const room = scr.clientHeight - (parseFloat(getComputedStyle(scr).paddingBottom) || 0) - body.offsetTop;
+  let cap = '';
+  if (room > 0 && body.scrollHeight > room + 1) {
+    let end = 0;
+    [].forEach.call(body.children, function (el) {
+      const b = el.offsetTop + el.offsetHeight;
+      if (el.offsetParent === body && b <= room && b > end) end = b;
+    });
+    const gap = parseFloat(getComputedStyle(body).rowGap) || 0;
+    if (end) cap = Math.min(room, end + gap) + 'px';
+  }
+  if (body.style.maxHeight !== cap) body.style.maxHeight = cap;
+  updateFades(body);
+}
+
+/* A row Home just hid (Library, Missed, Continue) must not keep focus, or the
+   next pinch lands nowhere: move to the next visible row, else the previous. */
+function homeRefocus(had) {
+  const home = screens.home;
+  if (!had || !home || current !== 'home' || !home.contains(had) || had.offsetParent !== null) return;
+  const a = document.activeElement;
+  if (a && a !== had && a !== document.body && home.contains(a) && a.offsetParent !== null) return;
+  const rows = [].slice.call(home.querySelectorAll('.focusable:not([disabled])'));
+  const i = rows.indexOf(had);
+  const ok = function (el) { return el.offsetParent !== null; };
+  const el = rows.slice(i + 1).filter(ok)[0] || rows.slice(0, Math.max(i, 0)).filter(ok).pop();
+  if (!el) return;
+  el.focus();
+  reveal(el);
+}
+
+/* ---- Navigation stack ----------------------------------------------------
+
+   Every forward move is navTo(entry) and every Back pops, so Back returns to
+   exactly the screen, row and scroll position the wearer left. An entry is
+   { name, render, focusKey, focusIdx, scrollTop } and redraws itself from
+   data it already holds, so going back never refetches. Home is depth 0.
+
+   Browser history mirrors the stack: the root is seeded with replaceState and
+   each level gets one pushState, at most HIST_MAX of them (the glasses cap
+   history at 5 entries including the root). On firmware v125.1+ the
+   middle-finger tap is history.back(), which arrives here as popstate - the
+   same path ArrowLeft takes. Every navigation bumps navGen, and async loads
+   drop their result when it moved, so a feed the wearer backed out of never
+   takes over the screen later. */
+const HIST_MAX = 4;
+const homeEntry = { name: 'home', render: function () { renderHome(); show('home'); } };
+let navStack = [homeEntry];
+let navGen = 0;
+let navRendering = false;
+let navAfterRoot = null;
+
+function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+function navTop() { return navStack[navStack.length - 1]; }
+function navDepth() { return navStack.length - 1; }
+
+function histDepth() {
+  const s = history.state;
+  return s && s.gt ? (Number(s.d) || 0) : 0;
+}
+
+/* Remember where focus and scroll sit on the top entry before leaving it. */
+function navSave() {
+  const top = navTop();
+  if (!top || top.name !== current || current === 'player') return;
+  const f = focusables();
+  const el = document.activeElement;
+  const i = f.indexOf(el);
+  top.focusKey = i >= 0 ? focusKeyOf(el) : '';
+  top.focusNth = i >= 0 ? f.slice(0, i).filter(x => focusKeyOf(x) === top.focusKey).length : 0;
+  top.focusIdx = i;
+  const body = screens[current] && screens[current].querySelector('.screen-body');
+  top.scrollTop = body ? body.scrollTop : 0;
+  // Search keeps its own cursor (nothing there holds DOM focus).
+  if (current === 'search') top.cursor = { row: keyRow, col: keyCol, x: keyX, chip: chipIdx };
+}
+
+function navRender(entry, restore) {
+  navRendering = true;
+  try { entry.render(entry); } finally { navRendering = false; }
+  if (restore) navRestore(entry);
+}
+
+/* Focus by key, then by index, else the screen's own default (the first video
+   row in a list, nothing on From iPhone). */
+function navRestore(entry) {
+  if (current === 'player' || current !== entry.name) return;
+  const f = focusables();
+  let el = null;
+  if (entry.focusKey) {
+    const hits = f.filter(x => focusKeyOf(x) === entry.focusKey);
+    el = hits[Math.min(entry.focusNth || 0, hits.length - 1)] || null;
+  }
+  if (!el && entry.focusIdx >= 0 && f.length) el = f[Math.min(entry.focusIdx, f.length - 1)];
+  if (!el) return;
+  const body = screens[current] && screens[current].querySelector('.screen-body');
+  if (body && entry.scrollTop) body.scrollTop = entry.scrollTop;
+  el.focus({ preventScroll: true });
+  reveal(el);
+}
+
+/* After a push or a replace, make the current history entry say this depth.
+   pushState only when history is exactly one level short; if it is already at
+   or past this depth (an entry was dropped without moving history), replace. */
+function navHistory() {
+  const d = navDepth();
+  const h = histDepth();
+  try {
+    if (h >= d) history.replaceState({ gt: 1, d: d }, '');
+    else if (d <= HIST_MAX) history.pushState({ gt: 1, d: d }, '');
+  } catch (e) { /* history is a nicety; ArrowLeft still pops the stack */ }
+}
+
+/* opts.replace swaps the top entry instead of stacking a new one (channel
+   pages, a new push replacing an older one). Home is never replaced. */
+function navTo(entry, opts) {
+  const replace = !!(opts && opts.replace) && navStack.length > 1;
+  const under = !!(opts && opts.under);
+  // An 'under' caller has saved and trimmed the stack itself: the screen on
+  // view may no longer be the top entry, so saving here would clobber it.
+  if (!under) navSave();
+  navGen++;
+  feedWait = '';
+  if (replace) navStack[navStack.length - 1] = entry;
+  else navStack.push(entry);
+  // opts.under: an entry that a player is about to cover. If history already
+  // reaches this depth, leave it alone so the player can reuse that entry.
+  if (!under || histDepth() < navDepth()) navHistory();
+  navRender(entry, false);
+}
+
+/* Redraw the top entry in place (new data arrived) and keep the wearer's row. */
+function navRefresh() {
+  navSave();
+  navRender(navTop(), true);
+}
+
+function navPopTo(target) {
+  target = Math.max(0, Math.min(target, navDepth()));
+  const played = current === 'player' && nowPlaying ? nowPlaying.id : '';
+  // Which copy of that id was playing, for lists that hold a video twice.
+  let playedNth = 0;
+  if (played && Array.isArray(queue)) {
+    for (let i = 0; i < queueIndex && i < queue.length; i++) {
+      if (queue[i] && queue[i].id === played) playedNth++;
     }
-    show('home');
+  }
+  navGen++;
+  feedWait = '';
+  navStack.length = target + 1;
+  const top = navTop();
+  // Leaving the player lands on the row of the video that was playing, even
+  // when the queue moved on from the one that was picked.
+  if (played && top.videos && top.videos.some(v => v && v.id === played)) {
+    top.focusKey = played;
+    top.focusNth = playedNth;
+    top.focusIdx = -1;
+  }
+  navRender(top, true);
+  if (played) labelResumeRow(played, playedNth);
+  if (target === 0) navRunAfterRoot();
+}
+
+function homePulse() {
+  pulse(document.querySelector('#screen-home .title-home'));
+}
+
+/* ArrowLeft and the back keys. Left on Home does nothing but a short pulse on
+   the title, so repeated Lefts always settle on Home with focus kept. */
+function goBack() {
+  const depth = navDepth();
+  if (depth <= 0) {
+    if (current !== 'home') navRender(homeEntry, true);
+    homePulse();
     return;
   }
-  if (current !== 'home') show('home');
+  navGen++;
+  feedWait = '';
+  if (histDepth() === depth) {
+    try { history.back(); return; } catch (e) { /* pop by hand below */ }
+  }
+  navPopTo(depth - 1);
+  try { history.replaceState({ gt: 1, d: Math.min(navDepth(), histDepth()) }, ''); } catch (e) {}
+}
+
+function navRunAfterRoot() {
+  const f = navAfterRoot;
+  navAfterRoot = null;
+  if (f) f();
+}
+
+/* Straight back to Home, history included. `after` runs once history is at
+   the root - WP1's update reload must wait for that (a reload at depth > 0
+   would leave stale same-page entries behind the new page). */
+function navRoot(after) {
+  const h = histDepth();
+  if (navStack.length > 1 || current !== 'home') {
+    navSave();
+    navGen++;
+    feedWait = '';
+    navStack.length = 1;
+    navRender(homeEntry, true);
+  }
+  if (h > 0) {
+    navAfterRoot = after || null;
+    try {
+      history.go(-h);
+      if (after) setTimeout(navRunAfterRoot, 800);
+      return;
+    } catch (e) { navAfterRoot = null; }
+  }
+  if (after) after();
+}
+
+window.addEventListener('popstate', function (e) {
+  inputTestNote('popstate');
+  const s = e.state;
+  const depth = navDepth();
+  let target = s && s.gt ? (Number(s.d) || 0) : 0;
+  // Never pushState in here. A popstate that does not go below the current
+  // depth (history got ahead of the stack) still counts as one Back.
+  if (target >= depth) {
+    if (depth === 0) { navRunAfterRoot(); return; }
+    target = depth - 1;
+    try { history.replaceState({ gt: 1, d: target }, ''); } catch (x) {}
+  }
+  navPopTo(target);
+});
+
+/* The first render starts at startAt. A later re-render (Back onto this
+   entry from a screen stacked over the player) resumes where the wearer left
+   that video instead of replaying the captured start point. */
+function navPlayer(index, startAt) {
+  let opened = false;
+  navTo({ name: 'player', render: function () {
+    const v = queue[index];
+    openPlayer(index, true, opened && v ? resumeAt(v.id) : startAt);
+    opened = true;
+  } });
+}
+
+function navVideoList(title, videos, kind, opts) {
+  navTo({
+    name: 'list', kind: kind || '', videos: videos,
+    render: function () { showVideoList(title, videos, kind); },
+  }, opts);
+}
+
+/* While a picked row's feed loads it shows a spinner and 'Loading…'. A row
+   that is already loading ignores a second pinch. */
+function rowLoading(key) {
+  if (current !== 'list' || !key) return null;
+  const rows = [].slice.call(document.querySelectorAll('#list-items [data-key]'));
+  const row = rows.filter(r => r.getAttribute('data-key') === key)[0];
+  if (!row) return null;
+  if (!row.classList.contains('is-loading')) {
+    row.classList.add('is-loading');
+    const copy = row.querySelector('.list-copy') || row;
+    const tag = document.createElement('span');
+    tag.className = 'row-load';
+    tag.innerHTML = '<span class="row-spin"></span>Loading…';
+    copy.appendChild(tag);
+  }
+  return row;
+}
+
+function rowLoaded(row) {
+  if (!row) return;
+  row.classList.remove('is-loading');
+  const tag = row.querySelector('.row-load');
+  if (tag) tag.remove();
 }
 
 function queueTitle() {
@@ -532,35 +1256,130 @@ function queueTitle() {
     : 'Videos';
 }
 
-function renderList(title, items, emptyText, onBack, backLabel, kind) {
+/* Back is ArrowLeft or the system Back (the nav stack), so lists carry no
+   Back row. An empty list can offer one action row instead, which then has
+   focus. Item fields used here: key (stable id for focus restore), video
+   (a video row: default focus), count (counts toward the n/N in the title). */
+/* PLAN OVERFLOW: long text is cut at a word boundary with '…', not mid-word
+   by the CSS ellipsis. Done once at render (never per key) with canvas
+   measureText at the element's own computed font, one shared context. The
+   CSS clamp stays as the fallback and the full text goes in title. An
+   element with no width yet (its screen hidden) waits for show(). */
+let fitCtx = null;
+let fitFont = '';
+let fitSeen = new Map(); // word -> width at fitFont
+const ROW_FIT = { w: 0, font: '' };
+
+function fitWords(text, font, width, lines) {
+  if (!fitCtx) {
+    try { fitCtx = document.createElement('canvas').getContext('2d'); } catch (e) { fitCtx = null; }
+    if (!fitCtx) return text;
+  }
+  if (fitFont !== font || fitSeen.size > 4000) {
+    fitCtx.font = font;
+    fitFont = font;
+    fitSeen = new Map();
+  }
+  const m = t => {
+    let w = fitSeen.get(t);
+    if (w === undefined) { w = fitCtx.measureText(t).width; fitSeen.set(t, w); }
+    return w;
+  };
+  const words = text.split(/\s+/).filter(Boolean);
+  const gap = m(' ');
+  const max = width - 2; // canvas and layout can differ by a subpixel or so
+  let line = 1;
+  let x = 0;
+  let start = 0; // index in words of the first word on the current line
+  const ends = []; // x after each word on its line
+  for (let i = 0; i < words.length; i++) {
+    const w = m(words[i]);
+    const nx = x ? x + gap + w : w;
+    if (nx <= max) { x = nx; ends.push(x); continue; }
+    if (line < lines && x) { line++; start = i; x = w; ends.push(x); if (w <= max) continue; }
+    // Out of room: keep whole words and leave space for the ellipsis.
+    let n = Math.min(i, ends.length);
+    const ell = m('…');
+    while (n > start && ends[n - 1] + ell > max) n--;
+    if (n === 0) return text; // one word wider than the line: CSS cuts it
+    return words.slice(0, n).join(' ').replace(/[\s,;:·|\-–—]+$/, '') + '…';
+  }
+  return text;
+}
+
+/* slot, when given, is shared by elements that all lay out alike (video-row
+   titles): measured once, then reused so a list render forces no layout. */
+function fitText(jobs, slot) {
+  // Read every width and font first, then write: one layout, not one per row.
+  const read = jobs.filter(j => j && j[0]).map(j => {
+    const el = j[0];
+    let w = slot && slot.w;
+    let font = slot && slot.font;
+    if (!w) {
+      const cs = getComputedStyle(el);
+      w = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+      font = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+      if (slot && w > 0) { slot.w = w; slot.font = font; }
+    }
+    return { el: el, text: String(j[1] == null ? '' : j[1]), lines: j[2] || 1, w: w, font: font };
+  });
+  read.forEach(r => {
+    r.el._fitText = r.text;
+    r.el._fitLines = r.lines;
+    r.el._fitSlot = slot;
+    r.el.classList.toggle('fit-wait', !(r.w > 0));
+    const out = r.w > 0 ? fitWords(r.text, r.font, r.w, r.lines) : r.text;
+    if (r.el.textContent !== out) r.el.textContent = out;
+    if (out !== r.text) r.el.title = r.text;
+    else r.el.removeAttribute('title');
+  });
+}
+
+function fitPending(root) {
+  const els = root ? root.querySelectorAll('.fit-wait') : [];
+  [].forEach.call(els, el => fitText([[el, el._fitText, el._fitLines]], el._fitSlot));
+}
+
+function renderList(title, items, emptyText, kind, emptyAction) {
   listKind = kind || '';
-  listBack = onBack || (() => show('home'));
-  $('#list-title').textContent = title;
   const box = $('#list-items');
   box.innerHTML = '';
   if (!items.length) {
     const p = document.createElement('div');
     p.className = 'empty-msg';
-    p.textContent = emptyText || 'Nothing here yet.';
+    const text = emptyText || 'Nothing here yet.';
+    // A list still on its way gets the spinner, so it never reads as empty.
+    if (/^(Searching|Loading)\b/.test(text)) {
+      p.classList.add('empty-busy');
+      const spin = document.createElement('span');
+      spin.className = 'load-spin';
+      p.appendChild(spin);
+    }
+    p.appendChild(document.createTextNode(text));
     box.appendChild(p);
-  } else {
-    items.slice(0, MAX_LIST).forEach(item => {
+    if (emptyAction) items = [Object.assign({ key: 'empty-action' }, emptyAction)];
+  }
+  const fits = [];
+  const textFits = [];
+  const page = listPageItems(items, title, emptyText, kind, emptyAction);
+  box.dataset.countBase = page.base;
+  box.dataset.countTotal = page.total;
+  if (items.length) {
+    page.rows.forEach(item => {
       const btn = document.createElement('button');
-      btn.className = 'focusable list-btn';
+      btn.className = 'focusable list-btn' + (item.thumb ? ' has-shot' : '') +
+        (item.cls ? ' ' + item.cls : '');
+      if (item.key) btn.setAttribute('data-key', item.key);
+      if (item.video) btn.setAttribute('data-video', '1');
+      if (item.count) btn.setAttribute('data-count', '1');
       if (item.thumb) {
         const shot = document.createElement('span');
         shot.className = 'list-shot';
         const img = document.createElement('img');
         img.alt = '';
-        img.loading = 'lazy';
-        img.src = item.thumb;
+        img.decoding = 'async';
+        img.dataset.src = mqThumb(item.thumb);
         shot.appendChild(img);
-        if (item.duration) {
-          const d = document.createElement('span');
-          d.className = 'list-dur';
-          d.textContent = item.duration;
-          shot.appendChild(d);
-        }
         if (item.progress) {
           const bar = document.createElement('span');
           bar.className = 'list-seen';
@@ -574,6 +1393,11 @@ function renderList(title, items, emptyText, onBack, backLabel, kind) {
       const label = document.createElement('span');
       label.className = 'list-label';
       label.textContent = item.label;
+      // Video rows share one slot; full-width text rows are fitted on their
+      // own so a long name ends on a word, not mid-word. The Play all pill
+      // sizes to its label, so it has no width of its own to fit against.
+      if (item.thumb) fits.push([label, item.label, 2]);
+      else if (!/\bis-action\b/.test(item.cls || '')) textFits.push([label, item.label, 1]);
       copy.appendChild(label);
       if (item.sub) {
         const sub = document.createElement('small');
@@ -584,56 +1408,143 @@ function renderList(title, items, emptyText, onBack, backLabel, kind) {
       btn.addEventListener('click', item.onPick);
       box.appendChild(btn);
     });
+    if (box.firstElementChild) thumbsNear(box.firstElementChild);
   }
-  const back = $('#list-back');
-  back.innerHTML = '';
-  const b = document.createElement('button');
-  b.className = 'focusable back-btn';
-  b.innerHTML = (backLabel || 'Back') + ' <span class="back-hint">swipe left</span>';
-  b.addEventListener('click', listBack);
-  back.appendChild(b);
+  fitText(fits, ROW_FIT);
   show('list');
+  fitText(textFits);
+  listCount(true);
+  // After the counter is set: the title fills what the counter leaves.
+  fitText([[$('#list-title'), title, 1]]);
+}
+
+/* One page of a long list. The page is kept on the list's nav entry; a
+   re-render (Back from the player, new data) shows the page holding the
+   remembered row, so Back still lands on the row that was played. Paging
+   swaps the rows in place: Back still leaves the list, not the page. */
+function listPageItems(items, title, emptyText, kind, emptyAction) {
+  const total = items.filter(it => it.count).length;
+  if (items.length <= MAX_LIST) return { rows: items, base: 0, total: total };
+  const top = navTop();
+  const ent = top && top.name === 'list' ? top : {};
+  const pages = Math.ceil(items.length / MAX_LIST);
+  let p = Math.max(0, Math.min(pages - 1, Number(ent.listPage) || 0));
+  if (ent.focusKey) {
+    const at = items.findIndex(it => it.key === ent.focusKey);
+    if (at >= 0) p = Math.floor(at / MAX_LIST);
+  }
+  ent.listPage = p;
+  const start = p * MAX_LIST;
+  const end = Math.min(items.length, start + MAX_LIST);
+  const base = items.slice(0, start).filter(it => it.count).length;
+  const counted = items.slice(start, end).filter(it => it.count).length;
+  const turn = (np, key) => {
+    ent.listPage = np;
+    ent.focusKey = key || '';
+    ent.focusNth = 0;
+    ent.focusIdx = -1;
+    ent.scrollTop = 0;
+    renderList(title, items, emptyText, kind, emptyAction);
+    const f = focusables();
+    const el = f.filter(x => focusKeyOf(x) === key)[0] || f[0];
+    if (el) { el.focus(); reveal(el); }
+  };
+  const rows = [];
+  if (p > 0) {
+    rows.push({
+      key: 'list-prev',
+      label: 'Earlier',
+      sub: 'Rows 1–' + base + ' of ' + total,
+      onPick: () => turn(p - 1, items[start - 1].key),
+    });
+  }
+  rows.push.apply(rows, items.slice(start, end));
+  if (end < items.length) {
+    rows.push({
+      key: 'list-more',
+      label: 'More',
+      sub: (total - base - counted) + ' more · rows ' + (base + counted + 1) + '–' + total,
+      onPick: () => turn(p + 1, items[end].key),
+    });
+  }
+  return { rows: rows, base: base, total: total };
+}
+
+/* 'n/N' to the right of the list title: the focused row among the counted
+   rows (videos, channels, playlists; not Play all or paging rows), as its
+   position in the whole list when the list is paged. */
+function listCount(noFit) {
+  const el = $('#list-count');
+  const box = $('#list-items');
+  if (!el || !box) return;
+  const rows = [].slice.call(box.querySelectorAll('[data-count]'));
+  const base = Number(box.dataset.countBase) || 0;
+  const total = Math.max(rows.length, Number(box.dataset.countTotal) || 0);
+  const i = rows.indexOf(document.activeElement);
+  const next = total < 2 ? '' : (i >= 0 ? (base + i + 1) + '/' : '') + total;
+  // Tabular digits: the counter only changes width when its length does,
+  // and only then does the title's room (and so its word cut) change.
+  const resized = el.textContent.length !== next.length;
+  el.textContent = next;
+  const t = $('#list-title');
+  if (resized && !noFit && t && t._fitText != null) fitText([[t, t._fitText, 1]]);
+}
+
+{
+  const listBox = $('#list-items');
+  if (listBox) listBox.addEventListener('focusin', () => listCount());
 }
 
 function videoItems(videos, onPick) {
   return videos.map((v, i) => {
     const mark = marksLoad()[v.id];
+    // 'Channel · 14:13 · 35% watched': the duration lives here, not in a
+    // badge over the thumbnail, and view counts are left out.
     const bits = [];
     if (v.channel) bits.push(v.channel);
-    if (v.meta) bits.push(v.meta);
-    else if (v.views) bits.push(v.views);
+    if (v.duration) bits.push(v.duration);
     const seen = markLabel(v.id);
     if (seen) bits.push(seen);
     return {
+      key: v.id,
+      video: true,
+      count: true,
       label: v.title || 'YouTube video',
       sub: bits.join(' · '),
       thumb: v.thumb,
-      duration: v.duration || '',
       progress: mark && mark.d ? (mark.t / mark.d) * 100 : 0,
       onPick: () => onPick(i, v),
     };
   });
 }
 
-function showVideoList(title, videos, onBack, kind) {
-  skipIds = {};
-  prefetched = {};
-  queue = videos.map(v => Object.assign({}, v, { _listTitle: title }));
+/* Showing a list never touches the queue. Only starting a video from it does,
+   so browsing can never replace what is playing. */
+function showVideoList(title, videos, kind) {
   const items = [];
   if (videos.length > 1) {
     items.push({
-      label: 'Play all',
-      sub: videos.length + ' videos, then the next one starts itself',
-      onPick: () => {
-        queue = maybeShuffle(queue);
-        openPlayer(0, true, resumeAt(queue[0] && queue[0].id));
-      },
+      key: 'play-all',
+      label: 'Play all · ' + videos.length,
+      cls: 'is-action',
+      onPick: () => playFromList(title, videos, 0, true, kind),
     });
   }
-  items.push.apply(items, videoItems(videos, function (i, v) {
-    openPlayer(i, true, resumeAt(v.id));
+  items.push.apply(items, videoItems(videos, function (i) {
+    playFromList(title, videos, i, false, kind);
   }));
-  renderList(title, items, 'No videos in this list.', onBack || (() => show('home')), 'Back', kind);
+  renderList(title, items, 'No videos in this list.', kind);
+}
+
+function playFromList(title, videos, index, all, kind) {
+  skipIds = {};
+  // The phone's list stays the phone's list: pushed queues never wrap (WP7.8).
+  const pushed = kind === 'push' || !!(videos[0] && videos[0]._pushed);
+  queue = videos.map(v => Object.assign({}, v, { _listTitle: title }, pushed ? { _pushed: true } : null));
+  if (all) queue = maybeShuffle(queue);
+  const v = queue[index];
+  if (!v) return;
+  navPlayer(index, resumeAt(v.id));
 }
 
 function setLoading(on, title, text) {
@@ -644,21 +1555,33 @@ function setLoading(on, title, text) {
   el.classList.toggle('hidden', !on);
   if (on) setPlayGate(false);
   if (name) name.textContent = title || (nowPlaying && nowPlaying.title) || 'YouTube video';
-  if (msg) msg.textContent = netOffline ? 'No internet. Retrying...' : (text || 'Loading...');
+  if (text) loadText = text;
+  if (msg) msg.textContent = netOffline ? offlineText() : pushGateText(loadText || 'Loading video…');
+  queuePlayerPaint();
 }
 
-function setPlayGate(on, title, text) {
+/* The gate: a ring with 'Pinch to play' (or text), and an optional 22px line
+   under it. A pushed video says where it came from. */
+function setPlayGate(on, title, text, sub) {
   const gate = $('#play-gate');
   const name = $('#play-gate-title');
   const msg = $('#play-gate-msg');
+  const below = $('#play-gate-sub');
   if (!gate) return;
   gate.classList.toggle('hidden', !on);
   if (on) {
     const load = $('#load-gate');
     if (load) load.classList.add('hidden');
+    // WP6: the pushed video is waiting for a pinch.
+    if (nowPlaying && deliveryFor(nowPlaying.id)) deliveryReport('pinch');
   }
   if (name) name.textContent = title || (nowPlaying && nowPlaying.title) || 'YouTube video';
-  if (msg && text) msg.textContent = text;
+  if (msg && on) msg.textContent = text || 'Pinch to play';
+  if (below && on) {
+    below.textContent = sub !== undefined ? sub
+      : (nowPlaying && nowPlaying._pushed ? 'Sent from your iPhone' : '');
+  }
+  queuePlayerPaint();
 }
 
 /* Route memory. Whatever played last time is tried first next time, so a
@@ -666,12 +1589,14 @@ function setPlayGate(on, title, text) {
 function savedRoute() {
   try {
     const r = localStorage.getItem(ROUTE_KEY) || '';
+    if (!routeSaved) routeSaved = r;
     return Player.routes().indexOf(r) >= 0 ? r : '';
   } catch (e) { return ''; }
 }
 
 function rememberRoute(r) {
-  if (!r) return;
+  if (!r || r === routeSaved) return;
+  routeSaved = r;
   try { localStorage.setItem(ROUTE_KEY, String(r)); } catch (e) { /* private mode */ }
 }
 
@@ -688,7 +1613,42 @@ function buildRouteChain(video) {
     chain.splice(i, 1);
     chain.splice(floor, 0, first);
   }
+  // A proxy that never produced metadata is not tried early again this
+  // session; it moves to the end of the fallbacks.
+  const p = chain.indexOf('proxy');
+  if (proxyDemoted && p >= 0 && p < chain.length - 1) {
+    chain.splice(p, 1);
+    chain.push('proxy');
+  }
   return chain;
+}
+
+/* Loading text that says what is happening and stays put: the phone file
+   first, then 'Trying another way… (2 of 4)' for each fallback. */
+function routeLoadText() {
+  const r = wayChain[wayPos];
+  if (wayPos === 0) return r === 'file' ? 'Getting video from your phone…' : 'Loading video…';
+  return 'Trying another way… (' + (wayPos + 1) + ' of ' + wayChain.length + ')';
+}
+
+/* The phone file's expiry, from Google's expire= parameter, in ms. */
+function fileExpiry(u) {
+  const m = String(u || '').match(/[?&]expire=(\d+)/);
+  return m ? Number(m[1]) * 1000 : 0;
+}
+
+function fileRemember(v) {
+  if (!v || !v.id || !v.u) return;
+  if (typeof Player !== 'undefined' && Player.isMediaUrl && !Player.isMediaUrl(v.u)) return;
+  fileFor[v.id] = { u: String(v.u), exp: fileExpiry(v.u) };
+}
+
+/* A file the phone sent earlier this session, while it has over 10 minutes
+   left. Continue, Recents, the queue and Missed all come through here. */
+function fileReuse(v) {
+  if (!v || !v.id || v.u) return;
+  const f = fileFor[v.id];
+  if (f && f.exp - Date.now() > 10 * 60 * 1000) v.u = f.u;
 }
 
 function routeLabel(r) {
@@ -759,25 +1719,65 @@ function blockedText(code, err) {
   return 'Nothing could play this one (' + (code || 'no code') + '). Try another video.';
 }
 
+/* The most informative failure among this video's attempts. fails are
+   playFails rows: 'id · route · code N · error'. A refused or unplayable
+   phone file says more than the fallbacks that failed after it. */
+function bestFailText(fails, code, err) {
+  const rows = (fails || []).map(String);
+  const codeOf = function (row) {
+    const m = row.match(/ · code (\d+) · /);
+    return m ? Number(m[1]) : 0;
+  };
+  for (let i = 0; i < rows.length; i++) {
+    const c = codeOf(rows[i]);
+    if (c === 100 || c === 2 || c === 101 || c === 150 || c === 153) return blockedText(c, rows[i]);
+  }
+  if (phoneOutOfDate()) return blockedText(0, '');
+  const fileRows = rows.filter(function (row) { return / · file · /.test(row); });
+  if (fileRows.some(function (row) { return /expired|expire|\b410\b/i.test(row); })) {
+    return 'The file from your phone expired. Send it again from your phone.';
+  }
+  if (fileRows.some(function (row) { return /\b403\b|Media error|no source|no progress/i.test(row); })) {
+    return 'Your glasses aren\'t on the same WiFi as your phone. Join the same WiFi and send it again.';
+  }
+  if (fileRows.some(function (row) { return /No file from the phone/i.test(row); })) {
+    return blockedText(0, 'No file from the phone');
+  }
+  return blockedText(code || 0, err || (rows[0] || ''));
+}
+
+function failsFor(id) {
+  return playFails.filter(function (row) { return row.indexOf(id + ' · ') === 0; });
+}
+
 function skipUnplayable(err, code) {
+  pushFailed();
   playFailNote(err, code);
   if (nowPlaying && nowPlaying.id) skipIds[nowPlaying.id] = true;
-  for (let i = 1; i <= queue.length; i++) {
-    const idx = (queueIndex + i) % queue.length;
-    const v = queue[idx];
-    if (v && v.id && !skipIds[v.id]) {
-      setStatus('Skipped one YouTube would not play.', false);
-      openPlayer(idx, true);
-      return;
-    }
+  // Same rule as Up next: forward only, wrapping only on repeat all for a
+  // list that is not the phone's, and never back to a video that failed.
+  const idx = nextIndex(true);
+  if (idx >= 0) {
+    showToast('Skipped one YouTube would not play.', 'info');
+    openPlayer(idx, true);
+    return;
   }
   setLoading(false);
   setPlayGate(false);
   blockedFor = (nowPlaying && nowPlaying.id) || '';
-  $('#player-error').textContent = queue.length > 1
-    ? 'Nothing in this list would play. ' + blockedText(code, err)
-    : blockedText(code, err);
+  stallStop();
+  // The message replaces the picture, so nothing may keep playing under it.
+  if (typeof Player !== 'undefined' && Player.pause) Player.pause();
+  const why = bestFailText(failsFor(blockedFor), code, err);
+  $('#player-error').textContent = queue.length > 1 && queue.every(v => v && skipIds[v.id])
+    ? 'Nothing in this list would play. ' + why
+    : why;
   $('#player-error').classList.remove('hidden');
+  // WP6: the final error, in WP5's bestFailText sentence the wearer sees.
+  if (nowPlaying && deliveryFor(nowPlaying.id)) deliveryReport('failed', why);
+  showRelayOffer();
+  const nextAct = $('#player-action-next');
+  if (nextAct) nextAct.classList.toggle('hidden', nextIndex(false) < 0);
   updateChrome();
 }
 
@@ -786,10 +1786,18 @@ function skipUnplayable(err, code) {
 function tryNextWay(videoId, err, code) {
   if (!videoId || isDeadVideo(code) || wayFor !== videoId) return false;
   if (loadRetry) return true;
+  // The gate is waiting for a pinch: the route is not failing, the browser
+  // is. Hold here; the pinch decides.
+  if (needGesture || (typeof Player !== 'undefined' && Player.autoplayBlocked && Player.autoplayBlocked())) {
+    return true;
+  }
   if (wayPos + 1 >= wayChain.length) return false;
   playFailNote(err, code);
   wayPos += 1;
+  stallStop();
+  const seq = openSeq;
   loadRetry = setTimeout(function () {
+    if (seq !== openSeq) return;
     loadRetry = 0;
     if (current === 'player' && nowPlaying && nowPlaying.id === videoId) {
       openPlayer(queueIndex, true, resumeAt(videoId), { retry: true });
@@ -802,7 +1810,11 @@ function openPlayer(index, autoplay, startAt, opts) {
   if (index < 0 || index >= queue.length) return;
   opts = opts || {};
   queueIndex = index;
+  shuffleMark(index);
   const video = queue[index];
+  const openId = ++openSeq;
+  stallStop();
+  fileReuse(video);
   if (!opts.retry) {
     if (loadRetry) {
       clearTimeout(loadRetry);
@@ -812,19 +1824,22 @@ function openPlayer(index, autoplay, startAt, opts) {
     wayPos = 0;
     wayFor = video.id;
   }
-  if (blockedFor && blockedFor !== video.id) blockedFor = '';
+  // A fresh open (not a route retry) starts clean, even for the video that
+  // just hit the final error: that error is only for this attempt.
+  if (blockedFor && (!opts.retry || blockedFor !== video.id)) blockedFor = '';
+  if (current !== 'player') legendCount();
+  playerUiReset(!!opts.retry);
   nowPlaying = video;
+  deliveryVideo(video.id);
   recentsAdd(video);
   $('#player-title').textContent = video.title || 'YouTube video';
-  $('#player-channel').textContent = [video.channel || '', video.meta || ''].filter(Boolean).join(' · ');
+  $('#player-channel').textContent = playerSubLine();
   $('#player-error').classList.add('hidden');
   $('#player-time').textContent = '0:00 / 0:00';
-  $('#player-fill').style.width = '0%';
-  const buf = $('#player-buffer');
-  if (buf) buf.style.width = '0%';
+  paintBar(0, 0);
   needGesture = false;
   setPlayGate(false);
-  setLoading(true, video.title, wayPos === 0 ? 'Loading...' : 'Trying ' + routeLabel(wayChain[wayPos]) + '...');
+  setLoading(true, video.title, routeLoadText());
   show('player');
   if (typeof Player === 'undefined') {
     $('#player-error').textContent = 'Player script missing.';
@@ -833,9 +1848,10 @@ function openPlayer(index, autoplay, startAt, opts) {
   }
   const attempt = wayPos;
   const route = wayChain[wayPos] || 'proxy';
-  Player.setHandlers(playNext, updateChrome);
+  Player.setHandlers(onVideoEnded, updateChrome, playerEvent);
   hudNote('route', { route: route, attempt: attempt, chain: wayChain.join('>'), hasU: !!video.u });
   Player.load(video, autoplay, startAt || 0, route).then(function (ok) {
+    if (openId !== openSeq) return;
     hudNote('loaded', { route: route, ok: !!ok, err: ok ? '' : String(Player.lastError() || ''),
       code: Player.lastCode ? Player.lastCode() : 0 });
     if (!ok) {
@@ -844,83 +1860,422 @@ function openPlayer(index, autoplay, startAt, opts) {
       if (!tryNextWay(video.id, err, code)) skipUnplayable(err, code);
     } else {
       setOffline(false);
-      prefetchNext();
     }
     updateChrome();
-    if (autoplay) {
-      setTimeout(function () {
-        if (current !== 'player') return;
-        if (nowPlaying && nowPlaying.id !== video.id) return;
-        if (wayPos !== attempt) return;
-        const snap = Player.snapshot();
-        hudNote('check3s', { route: route, playing: !!snap.playing, paused: !!snap.paused,
-          error: snap.error || '', time: snap.time });
-        if (snap.playing || snap.paused || snap.error) return;
-        needGesture = true;
-        setPlayGate(true, video.title, 'Enter to play');
-        updateChrome();
-      }, 3200);
-      setTimeout(function () {
-        if (current !== 'player') return;
-        if (nowPlaying && nowPlaying.id !== video.id) return;
-        if (wayPos !== attempt) return;
-        const snap = Player.snapshot();
-        if (snap.playing || snap.paused || snap.ended || snap.error) return;
-        if (snap.time > 0.4) return;
-        hudNote('stalled', { route: route, time: snap.time, gate: needGesture });
-        if (!tryNextWay(video.id, routeLabel(route) + ' stalled', 0) && !needGesture) {
-          skipUnplayable(routeLabel(route) + ' stalled', 0);
-        }
-      }, 12000);
-    }
+    if (!ok || !autoplay) return;
+    // Diagnostics only. The gate comes from a refused play(), not a timer.
+    setTimeout(function () {
+      if (openId !== openSeq || current !== 'player') return;
+      const snap = Player.snapshot();
+      hudNote('check3s', { route: route, playing: !!snap.playing, paused: !!snap.paused,
+        error: snap.error || '', time: snap.time, readyState: snap.readyState,
+        buffered: Math.round((snap.buffered || 0) * 10) / 10, playRejected: snap.playRejected || '',
+        blocked: !!snap.blocked });
+    }, 3000);
+    stallStart(openId, video, route);
   });
 }
 
-/* Warm the next video on the server route so the gap between tracks is a
-   beat, not a stall. Harmless when the route ends up being the phone file. */
-function prefetchNext() {
-  const nxt = queue[queueIndex + 1] || (prefs && prefs.repeat() === 'all' ? queue[0] : null);
-  if (!nxt || !nxt.id || nxt.id === (nowPlaying && nowPlaying.id)) return;
-  if (nxt.u || prefetched[nxt.id]) return;
-  prefetched[nxt.id] = true;
-  try {
-    fetch('/api/watch?v=' + encodeURIComponent(nxt.id) + (ytSession ? '&s=' + encodeURIComponent(ytSession) : ''), {
-      method: 'HEAD',
-    }).catch(function () { /* warming only */ });
-  } catch (e) { /* warming only */ }
+/* Once a second until this attempt has played: give the route up only on
+   evidence (Player.stallReason), and never while the gate waits. */
+function stallStart(openId, video, route) {
+  stallStop();
+  stallWatch = setInterval(function () {
+    if (openId !== openSeq || current !== 'player') {
+      stallStop();
+      return;
+    }
+    const snap = Player.snapshot();
+    if (snap.hasPlayed) {
+      stallStop();
+      return;
+    }
+    if (needGesture || snap.blocked) return;
+    const why = Player.stallReason ? Player.stallReason() : '';
+    if (!why) return;
+    stallStop();
+    hudNote('stalled', { route: route, time: snap.time, why: why, readyState: snap.readyState });
+    if (route === 'proxy' && /metadata/.test(why)) proxyDemoted = true;
+    if (!tryNextWay(video.id, routeLabel(route) + ' ' + why, 0)) {
+      skipUnplayable(routeLabel(route) + ' ' + why, 0);
+    }
+  }, 1000);
 }
 
+function stallStop() {
+  if (stallWatch) clearInterval(stallWatch);
+  stallWatch = 0;
+}
+
+/* Events the player raises beyond state changes. */
+function playerEvent(kind) {
+  if (current !== 'player') return;
+  if (kind === 'muted') {
+    showToast('Sound off · pinch for sound', 'info', 8000);
+    return;
+  }
+  if (kind === 'blocked') {
+    needGesture = true;
+    if (loadRetry) {
+      clearTimeout(loadRetry);
+      loadRetry = 0;
+    }
+    setPlayGate(true, nowPlaying && nowPlaying.title, 'Pinch to play');
+    hudNote('autoplay-blocked', { route: Player.lastRoute ? Player.lastRoute() : '' });
+    return;
+  }
+  if (kind === 'pause' || kind === 'ended') progressSave();
+}
+
+/* The index the next video would come from, or -1 at the end of the list.
+   Repeat All wraps, but a queue pushed from the phone never does (WP7).
+   pick=true lets shuffle choose; false gives the predictable neighbour. */
+/* WP7: shuffle visits every video in the queue once. When all have played it
+   ends the list like the in-order path does (Finished), unless Repeat all is
+   on and the queue was not pushed from the phone, which never wraps. The
+   shuffled pick is chosen once per (queue, position) so the 'Next: …' line,
+   the menu and the actual advance all name the same video. */
+var shuffleSeen = { q: null, ids: new Set() };
+var shufflePeek = null;
+
+function shuffleMark(index) {
+  if (shuffleSeen.q !== queue) shuffleSeen = { q: queue, ids: new Set() };
+  const v = queue[index];
+  if (v) shuffleSeen.ids.add(v.id);
+}
+
+function shufflePick() {
+  if (shufflePeek && shufflePeek.q === queue && shufflePeek.from === queueIndex &&
+      !(queue[shufflePeek.n] && skipIds[queue[shufflePeek.n].id])) return shufflePeek.n;
+  shuffleMark(queueIndex);
+  let pool = [];
+  queue.forEach((v, i) => { if (i !== queueIndex && !shuffleSeen.ids.has(v.id) && !skipIds[v.id]) pool.push(i); });
+  const pushed = !!(queue[0] && queue[0]._pushed);
+  if (!pool.length && prefs && prefs.repeat() === 'all' && !pushed) {
+    shuffleSeen.ids = new Set();
+    queue.forEach((v, i) => { if (i !== queueIndex && !skipIds[v.id]) pool.push(i); });
+  }
+  const n = pool.length ? pool[Math.floor(Math.random() * pool.length)] : -1;
+  shufflePeek = { q: queue, from: queueIndex, n };
+  return n;
+}
+
+function nextIndex(pick) {
+  if (!queue.length) return -1;
+  if (prefs && prefs.shuffle() && queue.length > 1) return shufflePick();
+  // A video that already failed (skipIds) is never offered again.
+  const ok = i => queue[i] && !skipIds[queue[i].id];
+  for (let i = queueIndex + 1; i < queue.length; i++) if (ok(i)) return i;
+  const pushed = !!(queue[0] && queue[0]._pushed);
+  if (prefs && prefs.repeat() === 'all' && queue.length > 1 && !pushed) {
+    for (let i = 0; i <= queueIndex && i < queue.length; i++) if (ok(i)) return i;
+  }
+  return -1;
+}
+
+/* A deliberate skip (the player menu's Next, or the error screen's swipe
+   down). It keeps each video's resume point. */
 function playNext() {
   if (!queue.length) return;
-  const mode = prefs ? prefs.repeat() : 'all';
-  if (mode === 'one') {
+  const n = nextIndex(true);
+  if (n < 0) {
+    showToast('End of list', 'info');
+    return;
+  }
+  progressSave();
+  openPlayer(n, true, resumeAt(queue[n] && queue[n].id));
+}
+
+/* Previous on the first video restarts it instead of wrapping. */
+function playPrev() {
+  if (queueIndex <= 0) {
+    restartVideo();
+    return;
+  }
+  const prev = queueIndex - 1;
+  // Marks are only written every 10s; keep the exact point being left.
+  progressSave();
+  openPlayer(prev, true, resumeAt(queue[prev] && queue[prev].id));
+}
+
+/* The video ran out: repeat one, a 5s 'Up next' card, or 'Finished'. */
+function onVideoEnded() {
+  if (current !== 'player') return;
+  if (prefs && prefs.repeat() === 'one') {
     openPlayer(queueIndex, true);
     return;
   }
-  if (prefs && prefs.shuffle() && queue.length > 1) {
-    let n = queueIndex;
-    while (n === queueIndex) n = Math.floor(Math.random() * queue.length);
-    openPlayer(n, true);
-    return;
-  }
-  if (queueIndex + 1 < queue.length) {
-    openPlayer(queueIndex + 1, true);
-    return;
-  }
-  if (mode === 'all' && queue.length > 1) {
-    openPlayer(0, true);
-    return;
-  }
-  setStatus('End of list.', false);
+  const n = nextIndex(true);
+  // The menu holds focus: the countdown waits for it to close, so a video
+  // never starts behind the menu and a pinch meant for a row stays a row.
+  if (n >= 0 && menuIsOpen()) upNextPending = n;
+  else if (n >= 0) startUpNext(n);
+  else showFinished();
 }
 
-function playPrev() {
-  if (queue.length < 2) {
-    goBack();
+/* WP4: what happens to each push the HUD receives.
+
+   - A stale one (the server says so, or, with no stale field, its ts is older
+     than 10 minutes by this clock) waits on Home as 'Missed from iPhone'. The
+     last 3 are kept for 24h. The phone's file URL is never persisted; the live
+     push stays in memory for this page's life.
+   - One that lands while the page is hidden is held, and plays on the next
+     visible event or the first key press.
+   - The rest play at once, with a receipt toast that route retries cannot
+     clear. lastPushInfo records what came of the latest one. */
+const MISSED_KEY = 'glasstube.missed';
+const MISSED_MAX = 3;
+const MISSED_TTL_MS = 24 * 60 * 60 * 1000;
+const LAST_PUSH_KEY = 'glasstube.lastPush';
+const PUSH_START_TEXT = 'From your iPhone · starting…';
+const IDLE_HOME_MS = 5000;
+let missedMem = {};
+let missedPlayedId = '';
+let pendingPush = null;
+let pushStartId = '';
+let pushStartAt = 0;
+let lastPushInfo = lastPushLoad();
+
+function agoText(ms) {
+  const m = Math.floor(Math.max(0, ms) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + ' min ago';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + ' h ago';
+  const d = Math.floor(h / 24);
+  return d === 1 ? 'yesterday' : d + ' days ago';
+}
+
+function pushVideos(dest) {
+  return (dest && dest.videos && dest.videos.length) ? dest.videos : [dest || {}];
+}
+
+function pushTitle(dest) {
+  const vids = pushVideos(dest);
+  const first = (vids[0] && vids[0].title) || (dest && dest.title) || 'YouTube video';
+  if (vids.length < 2) return first;
+  const name = dest.playlist && dest.playlist !== 'From iPhone' ? dest.playlist : first;
+  return name + ' · ' + vids.length + ' videos';
+}
+
+/* When the phone sent it, on this clock. The server's ageS beats its ts. */
+function pushSentAt(dest, gotAt) {
+  const age = Number(dest && dest.ageS);
+  if (dest && dest.ageS != null && Number.isFinite(age)) return gotAt - age * 1000;
+  const ts = Number(dest && dest.ts);
+  return ts > 0 ? ts : gotAt;
+}
+
+function pushIsStale(dest) {
+  if (dest && dest.stale != null) return dest.stale === true;
+  return !!(dest && dest.ts) && Date.now() - Number(dest.ts) > PUSH_FRESH_MS;
+}
+
+function lastPushLoad() {
+  try {
+    const v = JSON.parse(localStorage.getItem(LAST_PUSH_KEY) || 'null');
+    return v && v.at ? v : null;
+  } catch (e) { return null; }
+}
+
+function lastPushSave(info) {
+  lastPushInfo = info;
+  try { localStorage.setItem(LAST_PUSH_KEY, JSON.stringify(info)); } catch (e) { /* private mode */ }
+  if (current === 'phone') renderPhone();
+}
+
+function lastPushText() {
+  const p = lastPushInfo;
+  if (!p) return '';
+  return 'Last from iPhone: ' + p.title + ' · ' + agoText(Date.now() - p.at) +
+    (p.outcome ? ' · ' + p.outcome : '');
+}
+
+function lastPushMine() {
+  return !!(lastPushInfo && nowPlaying && (lastPushInfo.ids || []).indexOf(nowPlaying.id) >= 0);
+}
+
+function lastPushOutcome(outcome) {
+  if (!lastPushInfo || lastPushInfo.outcome === outcome) return;
+  lastPushSave(Object.assign({}, lastPushInfo, { outcome: outcome }));
+}
+
+/* From updateChrome: the video on screen is really playing. */
+function pushPlayed() {
+  pushStartId = '';
+  if (nowPlaying) missedPlayed(nowPlaying.id);
+  if (lastPushMine() && lastPushInfo.outcome !== 'played' && lastPushInfo.outcome !== 'missed') {
+    lastPushOutcome('played');
+  }
+}
+
+/* From skipUnplayable: no route could play it. */
+function pushFailed() {
+  if (lastPushMine() && !lastPushInfo.outcome) lastPushOutcome('couldn\'t play');
+}
+
+/* setLoading keeps the receipt on the load gate while a push starts. */
+function pushGateText(text) {
+  if (wayPos === 0 && !/Buffering/.test(text) && pushStartId && nowPlaying && nowPlaying.id === pushStartId &&
+      Date.now() - pushStartAt < 60000) return PUSH_START_TEXT;
+  return text;
+}
+
+function missedLoad() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(MISSED_KEY) || '[]');
+    const since = Date.now() - MISSED_TTL_MS;
+    return Array.isArray(raw)
+      ? raw.filter(function (m) { return m && m.id && m.key && Number(m.at) > since; })
+      : [];
+  } catch (e) { return []; }
+}
+
+function missedSave(list) {
+  try { localStorage.setItem(MISSED_KEY, JSON.stringify(list.slice(0, MISSED_MAX))); }
+  catch (e) { /* private mode */ }
+}
+
+function missedAdd(dest, sentAt) {
+  const vids = pushVideos(dest).filter(function (v) { return v && v.id; });
+  if (!vids.length) return;
+  const at = sentAt || pushSentAt(dest, Date.now());
+  const key = vids[0].id + '@' + Math.round(at);
+  missedMem[key] = dest;
+  const entry = {
+    key: key, at: at, id: vids[0].id, title: vids[0].title || dest.title || '',
+    channel: vids[0].channel || '', thumb: vids[0].thumb || '',
+    playlist: dest.playlist || '', app: dest.app || '',
+    videos: vids.slice(0, 50).map(function (v) {
+      return { id: v.id, title: v.title || '', channel: v.channel || '', thumb: v.thumb || '' };
+    }),
+  };
+  // A re-send of the same video replaces its older Missed entry.
+  missedSave([entry].concat(missedLoad().filter(function (m) {
+    if (m.key !== key && m.id !== entry.id) return true;
+    if (m.key !== key) delete missedMem[m.key];
+    return false;
+  })));
+}
+
+function missedTake(key) {
+  missedSave(missedLoad().filter(function (m) { return m.key !== key; }));
+}
+
+/* A video that has played, by any path, is no longer missed. */
+function missedPlayed(id) {
+  if (!id || id === missedPlayedId) return;
+  missedPlayedId = id;
+  const list = missedLoad();
+  const keep = list.filter(function (m) { return m.id !== id; });
+  if (keep.length === list.length) return;
+  list.forEach(function (m) { if (m.id === id) delete missedMem[m.key]; });
+  missedSave(keep);
+}
+
+/* The top Home row. Only the newest missed push shows; the next one takes
+   its place once it is played. */
+function renderMissed() {
+  const btn = $('#btn-missed');
+  if (!btn) return;
+  const m = missedLoad()[0];
+  const was = !btn.classList.contains('hidden');
+  btn.classList.toggle('hidden', !m);
+  homeFit();
+  if (!m) {
+    if (was && document.activeElement === btn && current === 'home') focusFirst();
     return;
   }
-  const prev = (queueIndex - 1 + queue.length) % queue.length;
-  openPlayer(prev, true);
+  const title = pushTitle(m);
+  // One status line (tag + age) and the title keep the row at 80px.
+  const sub = ' · Sent ' + agoText(Date.now() - m.at);
+  const mt = $('#missed-title');
+  if (mt._fitText !== title || mt.classList.contains('fit-wait')) fitText([[mt, title, 1]]);
+  if ($('#missed-sub').textContent !== sub) $('#missed-sub').textContent = sub;
+}
+
+function openMissed() {
+  const m = missedLoad()[0];
+  if (!m) { renderHome(); return; }
+  const dest = missedMem[m.key] || m;
+  missedTake(m.key);
+  delete missedMem[m.key];
+  playPush(Object.assign({}, dest), m.at, true);
+}
+
+function pushMissed(dest, sentAt) {
+  missedAdd(dest, sentAt);
+  lastPushSave({ title: pushTitle(dest), at: sentAt, outcome: 'missed',
+    ids: pushVideos(dest).slice(0, 50).map(function (v) { return v && v.id; }) });
+  renderHome();
+  if (current === 'home' && Date.now() - lastKeyAt > IDLE_HOME_MS) {
+    const btn = $('#btn-missed');
+    if (btn && !btn.classList.contains('hidden')) {
+      btn.focus();
+      reveal(btn);
+    }
+  }
+}
+
+function playPush(dest, sentAt, quiet) {
+  applyPush(dest);
+  lastPushSave({ title: pushTitle(dest), at: sentAt || Date.now(), outcome: '',
+    ids: queue.slice(0, 50).map(function (v) { return v.id; }) });
+  pushStartId = (nowPlaying && nowPlaying.id) || '';
+  pushStartAt = Date.now();
+  if (!quiet) showToast('From your iPhone · ' + pushTitle(dest), 'info', 3000);
+  const msg = $('#load-gate-msg');
+  if (msg && current === 'player' && !netOffline) msg.textContent = PUSH_START_TEXT;
+}
+
+/* pollPair hands over each new destSeq here, after the ack. */
+function handlePush(dest, seq, special) {
+  const gotAt = Date.now();
+  const first = pushVideos(dest)[0] || {};
+  const ageS = dest.ageS != null ? Number(dest.ageS)
+    : (dest.ts ? Math.round((gotAt - Number(dest.ts)) / 1000) : null);
+  const stale = !special && pushIsStale(dest);
+  const held = !special && !stale && !!document.hidden;
+  hudNote('push', { seq: seq, stale: stale, held: held, ageS: ageS,
+    hasU: !!(dest.u || first.u) });
+  if (special) {
+    // WP6: channels, channel and session pushes stay immediate on the server.
+    deliveryReport('got');
+    if (deliveryPush) deliveryPush.done = true;
+    applyPush(dest);
+    return;
+  }
+  const sentAt = pushSentAt(dest, gotAt);
+  if (stale) {
+    pushMissed(dest, sentAt);
+    // WP6: 'missed' replaces 'got' for a stale push (it still consumes it).
+    deliveryReport('missed', 'stale');
+    return;
+  }
+  deliveryReport('got');
+  if (held) {
+    if (pendingPush) pushMissed(pendingPush.dest, pendingPush.sentAt);
+    pendingPush = { dest: dest, sentAt: sentAt, seq: seq };
+    deliveryReport('hidden');
+    return;
+  }
+  playPush(dest, sentAt);
+}
+
+/* A held push plays when the wearer can see it. If it went stale while
+   held, it waits on Home instead of starting out of nowhere. */
+function releasePendingPush() {
+  if (!pendingPush) return false;
+  const p = pendingPush;
+  pendingPush = null;
+  if (Date.now() - p.sentAt > PUSH_FRESH_MS) {
+    pushMissed(p.dest, p.sentAt);
+    // WP6: only the push being tracked; a newer push has taken over otherwise.
+    if (deliveryPush && deliveryPush.seq === p.seq) deliveryReport('missed', 'held');
+  } else {
+    playPush(p.dest, p.sentAt);
+  }
+  return true;
 }
 
 /* A push from the phone. It can carry videos, a channel list, a channel to
@@ -932,28 +2287,37 @@ function playPrev() {
    only as something the wearer chooses from the error screen. */
 function applyPush(dest) {
   if (!dest) return;
+  lastPushAt = Date.now();
+  lastActiveAt = lastPushAt;
   if (dest.kind === 'session') {
     sessionStore(dest.session || '');
     library = null;
-    setStatus(dest.session ? 'Signed in from your phone.' : 'Signed out.', false);
+    showToast(dest.session ? 'Signed in from your iPhone' : 'Signed out from your iPhone', 'ok');
     renderHome();
     return;
   }
   if (dest.kind === 'channels') {
     channelsSave(dest.channels || []);
-    if (listKind === 'channels' && current === 'list') openChannels(channelPage);
-    if (current !== 'player') setStatus('Channels updated from your phone.');
+    if (listKind === 'channels' && current === 'list') navRefresh();
+    showToast('Channels updated from your iPhone', 'ok');
     return;
   }
   if (dest.kind === 'channel' && dest.id) {
+    // Never stack a phone-sent channel over the player: Back from it would
+    // re-open (and auto-start) that video. Leave the player first, onto the
+    // list under it with the played row focused; the channel list then
+    // reuses the player's history entry.
+    if (current === 'player' && navDepth() > 0 && navTop().name === 'player') {
+      navPopTo(navDepth() - 1);
+    }
     loadChannel({ id: dest.id, name: dest.name || 'Channel' });
+    showToast('From your iPhone · ' + (dest.name || 'Channel'), 'info', 3000);
     return;
   }
   if (dest.app) phoneApp = String(dest.app);
   const list = (dest.videos && dest.videos.length) ? dest.videos : [dest];
   const name = dest.playlist || 'From iPhone';
   skipIds = {};
-  prefetched = {};
   // A single-video push carries its file at the top level, not on the row.
   if (dest.u || dest.r) {
     list.forEach(function (v) {
@@ -963,8 +2327,14 @@ function applyPush(dest) {
       }
     });
   }
+  list.forEach(fileRemember);
   const ordered = maybeShuffle(list);
-  queue = ordered.map(v => Object.assign({}, v, { _listTitle: name }));
+  // The pushed list goes on the nav stack under the player, so Back lands on
+  // it with the played row focused. Navigate before replacing the queue:
+  // leaving a playing video saves its progress against its own queue.
+  navPushList(name, ordered);
+  queue = ordered.map(v => Object.assign({}, v, { _listTitle: name, _pushed: true }));
+  if (deliveryPush && !deliveryPush.done && !deliveryPush.ids) deliveryPush.ids = queue.map(v => v.id);
   playlistRemember(name, list);
   diagSend('push', {
     id: (queue[0] && queue[0].id) || '',
@@ -972,10 +2342,25 @@ function applyPush(dest) {
     hasR: !!(queue[0] && queue[0].r),
     origin: String(window.location.origin || ''),
   });
-  openPlayer(0, true, resumeAt(queue[0] && queue[0].id));
-  setStatus(list.length > 1
-    ? 'Playing ' + name + ' · ' + list.length + ' videos.'
-    : 'Playing from your phone.');
+  navPlayer(0, resumeAt(queue[0] && queue[0].id));
+}
+
+/* A push replaces what is playing rather than stacking on it: the player on
+   top (and an older pushed list under it) are swapped out, so a second push
+   never makes Back walk through the first one. The pushed list and its player
+   reuse the history entries they replace (no pushState over an entry that was
+   dropped without history.back()), and the list never sits deeper than
+   HIST_MAX - 1, so the player stays within the history cap and system Back
+   from it lands on the list exactly like ArrowLeft does. At the cap the
+   entry the wearer is on is kept (Back from the pushed list returns to it)
+   and the oldest level above Home is collapsed instead, so the stack keeps
+   the same depth as history. */
+function navPushList(title, videos) {
+  navSave();
+  if (navStack.length > 1 && navTop().name === 'player') navStack.pop();
+  if (navStack.length > 1 && navTop().kind === 'push') navStack.pop();
+  while (navStack.length > HIST_MAX - 1 && navStack.length > 2) navStack.splice(1, 1);
+  navVideoList(title, videos, 'push', { under: true });
 }
 
 /* The phone's LAN relay is plain HTTP and the HUD is HTTPS, so it can never be
@@ -999,35 +2384,22 @@ function openRelay() {
 function updateChrome() {
   if (current !== 'player' || typeof Player === 'undefined') return;
   const snap = Player.snapshot();
-  $('#player-time').textContent = fmtTime(snap.time) + ' / ' + fmtTime(snap.duration);
-  const pct = snap.duration ? Math.min(100, (snap.time / snap.duration) * 100) : 0;
-  $('#player-fill').style.width = pct + '%';
-  const buf = $('#player-buffer');
-  if (buf) {
-    const bpct = snap.duration ? Math.min(100, (snap.buffered / snap.duration) * 100) : 0;
-    buf.style.width = bpct + '%';
-  }
-  const pos = queue.length > 1 ? ((queueIndex + 1) + '/' + queue.length + ' · ') : '';
-  const nxt = queue[queueIndex + 1] || (prefs && prefs.repeat() === 'all' ? queue[0] : null);
-  let phase = 'Loading';
-  if (snap.playing) phase = 'Enter pause';
-  else if (snap.error && nowPlaying && blockedFor === nowPlaying.id) phase = 'Blocked';
-  else if (snap.error) phase = 'Trying another way';
-  else if (snap.paused) phase = 'Paused · Enter play';
-  else if (snap.ended) phase = 'Ended · Enter play';
-  else if (needGesture) phase = 'Enter to play';
-  else if (snap.buffering) phase = 'Buffering';
-  $('#player-hint').textContent = pos + phase +
-    (queue.length > 1 ? ' · Up last · Down next' : ' · Up -10s') +
-    ' · Left back · Right +10s';
-  if ($('#player-next')) {
-    $('#player-next').textContent = nxt && nxt.title && queue.length > 1
-      ? ('Next: ' + String(nxt.title).slice(0, 44))
-      : '';
-  }
+  queuePlayerPaint();
+  setText('#player-time', fmtTime(snap.time) + ' / ' + fmtTime(snap.duration));
+  paintBar(snap.duration ? snap.time / snap.duration : 0, snap.duration ? snap.buffered / snap.duration : 0);
+  setText('#player-channel', playerSubLine());
+  // The legend is static copy in index.html; 'Next: …' is ellipsized by CSS.
+  const nxt = queue.length > 1 ? queue[nextIndex(false)] : null;
+  setText('#player-next', nxt && nxt.title ? 'Next: ' + nxt.title : '');
   const title = nowPlaying && nowPlaying.title;
+  const scr = screens.player;
+  if (!(snap.buffering && snap.time > 0.4)) {
+    bufferSince = 0;
+    if (scr) scr.classList.remove('rebuffer', 'stall');
+  }
   if (snap.playing) {
     needGesture = false;
+    finished = false;
     setLoading(false);
     setPlayGate(false);
     $('#player-error').textContent = '';
@@ -1043,7 +2415,10 @@ function updateChrome() {
       loadRetry = 0;
     }
     rememberRoute(snap.route);
-    progressSave();
+    progressTick();
+    pushPlayed();
+    // WP6: the first 'playing' of the pushed video confirms the delivery.
+    if (nowPlaying && deliveryFor(nowPlaying.id)) deliveryReport('playing');
   } else if (snap.error) {
     needGesture = false;
     const id = nowPlaying && nowPlaying.id;
@@ -1054,20 +2429,36 @@ function updateChrome() {
       showRelayOffer();
       return;
     }
-    if (id && tryNextWay(id, snap.error, code)) {
-      setLoading(true, title, 'Trying ' + routeLabel(wayChain[wayPos]) + '...');
+    if (needGesture || snap.blocked) {
+      setPlayGate(true, title, 'Pinch to play');
+    } else if (id && tryNextWay(id, snap.error, code)) {
+      setLoading(true, title, routeLoadText());
     } else if (id) {
       skipUnplayable(snap.error, code);
     }
+  } else if (nowPlaying && blockedFor === nowPlaying.id) {
+    // Every route failed: the final error stays, never 'Loading'.
+    setLoading(false);
+    setPlayGate(false);
+    showRelayOffer();
   } else if (snap.paused || snap.ended) {
     needGesture = false;
-    setPlayGate(true, title, snap.ended ? 'Ended · Enter to play' : 'Paused · Enter to play');
-  } else if (needGesture) {
-    setPlayGate(true, title, 'Enter to play');
+    if (upNextIdx >= 0) setPlayGate(false);
+    else if (finished) setPlayGate(true, title, 'Finished', 'Pinch to replay · swipe left to exit');
+    else setPlayGate(true, title, 'Pinch to play', '');
+  } else if (needGesture || snap.blocked) {
+    setPlayGate(true, title, 'Pinch to play');
   } else if (snap.buffering && snap.time > 0.4) {
-    setLoading(true, title, 'Buffering...');
+    // A short rebuffer stays invisible; one over 1s shows the spinner and chrome.
+    if (!bufferSince) bufferSince = Date.now();
+    if (scr) {
+      scr.classList.add('rebuffer');
+      scr.classList.toggle('stall', Date.now() - bufferSince > 1000);
+    }
+    setLoading(true, title, 'Buffering…');
   } else {
-    setLoading(true, title, 'Loading...');
+    // Keep whatever the route said ('Getting video from your phone…').
+    setLoading(true, title);
   }
 }
 
@@ -1082,76 +2473,560 @@ function hideRelayOffer() {
   if (box) box.classList.add('hidden');
 }
 
-function openRecents() {
-  const list = recentsLoad();
-  if (!list.length) {
-    renderList('Recents', [], 'Nothing played yet. Open Channels, or send a link from your phone.', () => show('home'));
+/* ---- WP7: player chrome, dimming, seek feedback, menu, up next, exit ----
+   Only the video is lit while it plays. Any swipe brings the top and bottom
+   bands back for 3s; the gate, a pause, an error and a long stall keep them.
+   UI timers tick at most once a second, never per frame. */
+let exitPoint = null; // { id, t, at } of the video the wearer just left
+let chromeTimer = 0;
+let paintTimer = 0;
+let bufferSince = 0;
+let seekDir = 0;
+let seekAt = 0;
+let seekStep = 0;
+let seekTimer = 0;
+let leaveArmedAt = 0;
+let menuTimer = 0;
+let upNextTimer = 0;
+let upNextIdx = -1;
+let upNextPending = -1;
+let upNextLeft = 0;
+let finished = false;
+const CHROME_HOLD_MS = 3000;
+const FINISHED_HOLD_MS = 10000;
+const LEAVE_WINDOW_MS = 2500;
+const LEAVE_PROMPT = 'Swipe left again to leave';
+const MENU_IDLE_MS = 6000;
+const UPNEXT_S = 5;
+const LEGEND_KEY = 'glasstube.legend';
+const LEGEND_SESSIONS = 3;
+
+function setText(sel, text) {
+  const el = $(sel);
+  if (el && el.textContent !== text) el.textContent = text;
+}
+
+/* Fill and buffer are scaleX transforms; the knob rides on translateX. */
+function paintBar(frac, bufFrac) {
+  const f = Math.max(0, Math.min(1, frac || 0));
+  const b = Math.max(0, Math.min(1, bufFrac || 0));
+  const fill = $('#player-fill');
+  const buf = $('#player-buffer');
+  const knob = $('#player-knob');
+  const bar = $('#player-bar');
+  if (fill) fill.style.transform = 'scaleX(' + f.toFixed(4) + ')';
+  if (buf) buf.style.transform = 'scaleX(' + b.toFixed(4) + ')';
+  if (knob) knob.style.transform = 'translateX(' + Math.round(f * ((bar && bar.clientWidth) || 552)) + 'px)';
+}
+
+/* 'Channel · 2 of 5 · 1.5x · Sleep 12m' */
+function playerSubLine() {
+  const bits = [];
+  if (nowPlaying && nowPlaying.channel) bits.push(nowPlaying.channel);
+  if (queue.length > 1 && queueIndex >= 0) bits.push((queueIndex + 1) + ' of ' + queue.length);
+  if (prefs && prefs.speed() !== 1) bits.push(prefs.speedLabel());
+  if (sound && !sound.enabled()) bits.push('Sound off');
+  if (sleepUntil) bits.push('Sleep ' + Math.max(1, Math.ceil((sleepUntil - Date.now()) / 60000)) + 'm');
+  return bits.join(' · ');
+}
+
+function playerFault() {
+  return !!(nowPlaying && blockedFor && blockedFor === nowPlaying.id);
+}
+
+function menuIsOpen() {
+  const m = $('#player-menu');
+  return !!(m && !m.classList.contains('hidden'));
+}
+
+/* The first few times in the player, the gesture legend shows with the
+   chrome; after that only while paused. */
+function legendCount() {
+  try {
+    const n = Number(localStorage.getItem(LEGEND_KEY) || 0) || 0;
+    if (n <= LEGEND_SESSIONS) localStorage.setItem(LEGEND_KEY, String(n + 1));
+  } catch (e) { /* private mode */ }
+}
+
+function legendFresh() {
+  try { return (Number(localStorage.getItem(LEGEND_KEY) || 0) || 0) <= LEGEND_SESSIONS; }
+  catch (e) { return false; }
+}
+
+function queuePlayerPaint() {
+  if (paintTimer) return;
+  paintTimer = setTimeout(function () {
+    paintTimer = 0;
+    paintPlayer();
+  }, 0);
+}
+
+/* The load gate is on screen: shown, and not a short rebuffer (which the
+   stylesheet hides until it lasts over 1s). */
+function loadGateShown() {
+  const scr = screens.player;
+  const load = $('#load-gate');
+  return !!(load && !load.classList.contains('hidden')) &&
+    !(scr && scr.classList.contains('rebuffer') && !scr.classList.contains('stall'));
+}
+
+/* States that keep the chrome up: the gate, a pause, the final error, a
+   stall over 1s, the up next card, and loading before the first frame. */
+function chromeSticky(snap) {
+  const gate = $('#play-gate');
+  const gateOn = !!(gate && !gate.classList.contains('hidden')) && !finished;
+  return gateOn || loadGateShown() || !!snap.paused || playerFault() || upNextIdx >= 0;
+}
+
+function paintPlayer() {
+  const scr = screens.player;
+  if (!scr || current !== 'player' || typeof Player === 'undefined') return;
+  const snap = Player.snapshot();
+  const gate = $('#play-gate');
+  const gateOn = !!(gate && !gate.classList.contains('hidden'));
+  const fault = playerFault();
+  scr.classList.toggle('fault', fault);
+  scr.classList.toggle('dim', gateOn || loadGateShown() || !!snap.paused || menuIsOpen() || fault || finished || upNextIdx >= 0);
+  scr.classList.toggle('legend', !!snap.paused || legendFresh());
+  if (chromeSticky(snap)) {
+    scr.classList.add('chrome-on');
+    if (chromeTimer && !finished) {
+      clearTimeout(chromeTimer);
+      chromeTimer = 0;
+    }
+  } else if (scr.classList.contains('chrome-on') && !chromeTimer) {
+    armChromeHide(CHROME_HOLD_MS);
+  }
+}
+
+function armChromeHide(ms) {
+  if (chromeTimer) clearTimeout(chromeTimer);
+  chromeTimer = setTimeout(function () {
+    chromeTimer = 0;
+    const scr = screens.player;
+    if (current !== 'player' || !scr || typeof Player === 'undefined') return;
+    const snap = Player.snapshot();
+    if (chromeSticky(snap)) return;
+    // Hidden only while the picture plays (or the list has finished); paint
+    // re-arms this when playback resumes.
+    if (snap.playing || finished) scr.classList.remove('chrome-on');
+  }, ms || CHROME_HOLD_MS);
+}
+
+function chromeShow() {
+  const scr = screens.player;
+  if (!scr) return;
+  scr.classList.add('chrome-on');
+  armChromeHide(CHROME_HOLD_MS);
+  queuePlayerPaint();
+}
+
+/* Everything WP7 adds is per video; a new video or leaving starts clean. */
+function playerUiReset(keepUi) {
+  upNextPending = -1;
+  // A quiet route retry of the same video keeps what the wearer has open: the
+  // menu with its focus, and an armed guarded exit.
+  if (!keepUi) closePlayerMenu();
+  cancelUpNext();
+  finished = false;
+  bufferSince = 0;
+  missedPlayedId = '';
+  // Leaving by any path (system Back included) drops the guarded-exit prompt.
+  if (!keepUi) disarmLeave();
+  if (chromeTimer) clearTimeout(chromeTimer);
+  chromeTimer = 0;
+  if (seekTimer) clearTimeout(seekTimer);
+  seekTimer = 0;
+  setText('#player-seek', '');
+  const scr = screens.player;
+  if (scr) {
+    scr.classList.remove('dim', 'fault', 'upnext', 'rebuffer', 'stall');
+    if (!keepUi) scr.classList.remove('menu-open');
+    scr.classList.add('chrome-on');
+  }
+  const nextAct = $('#player-action-next');
+  if (nextAct) nextAct.classList.add('hidden');
+  hideRelayOffer();
+}
+
+/* Where the wearer left, so the list can say 'Resume · 12:34'. Near the end
+   counts as finished, so it resumes from the start. */
+function noteExit() {
+  if (!nowPlaying || !nowPlaying.id || typeof Player === 'undefined') return;
+  const snap = Player.snapshot();
+  let t = snap.time || 0;
+  if (snap.ended || (snap.duration && snap.duration - t < NEAR_END_S)) t = 0;
+  exitPoint = { id: nowPlaying.id, t: Math.floor(t), at: Date.now() };
+}
+
+/* Leaving the player lands on the row that was playing (WP3's navPopTo
+   focuses it by data-key); this labels it 'Resume · 12:34'. */
+function labelResumeRow(id, nth) {
+  if (!id || current !== 'list') return;
+  const rows = [].filter.call(document.querySelectorAll('#list-items [data-key]'),
+    r => r.dataset.key === id);
+  const row = rows[Math.min(nth || 0, rows.length - 1)] || null;
+  if (!row) return;
+  const t = resumeAt(id);
+  // The player starts anything at or below RESUME_MIN_S from 0:00.
+  if (t <= (typeof Player !== 'undefined' ? Player.RESUME_MIN_S : 3)) return;
+  const copy = row.querySelector('.list-copy');
+  let sub = copy && copy.querySelector('small');
+  if (copy && !sub) {
+    sub = document.createElement('small');
+    copy.appendChild(sub);
+  }
+  if (sub) sub.textContent = 'Resume · ' + fmtTime(t);
+}
+
+/* Seek with feedback: '+10s' in the bottom band for 900ms. Repeats in the
+   same direction within 1s go to 30s, then 60s. */
+function seekBy(dir) {
+  if (typeof Player === 'undefined') return;
+  const now = Date.now();
+  if (dir === seekDir && now - seekAt < 1000) seekStep = seekStep >= 30 ? 60 : 30;
+  else seekStep = 10;
+  seekDir = dir;
+  seekAt = now;
+  // A seek on 'Finished' takes the wearer back into this video: the gate
+  // reads 'Pinch to play' and a pinch plays from here, not from video 1.
+  if (finished) {
+    finished = false;
+    setPlayGate(false);
+  }
+  Player.seek(dir * seekStep);
+  setText('#player-seek', (dir > 0 ? '+' : '−') + seekStep + 's');
+  if (seekTimer) clearTimeout(seekTimer);
+  seekTimer = setTimeout(function () {
+    seekTimer = 0;
+    setText('#player-seek', '');
+  }, 900);
+  updateChrome();
+}
+
+function restartVideo() {
+  if (typeof Player === 'undefined') return;
+  finished = false;
+  cancelUpNext();
+  Player.seek(-1e7);
+  const snap = Player.snapshot();
+  // Right after the rewind an ended or paused <video> reads as state -1 (time
+  // 0, not 'paused'), so test 'not playing'. toggle() only pauses state 1.
+  if (!snap.playing) Player.toggle();
+  setPlayGate(false);
+  updateChrome();
+}
+
+/* Pinch: play or pause. When WP5 muted playback by policy, a pinch turns the
+   sound on instead of pausing. */
+function playerPinch() {
+  if (typeof Player === 'undefined') return;
+  // WP5: a policy mute turns sound on (the arbiter already ran Player.unlock
+  // inside this gesture) and hides the 'Sound off' toast.
+  if (Player.mutedByPolicy()) {
+    needGesture = false;
+    Player.unmute();
+    if (/^Sound off/.test(($('#toast') || {}).textContent || '')) hideToast();
+    updateChrome();
     return;
   }
-  showVideoList('Recents', list, () => show('home'));
+  // Pinch on 'Finished' replays the video just watched, not the whole list
+  // (Mike, 2026-10-14); Play all on the list still restarts it.
+  if (finished) {
+    finished = false;
+    setPlayGate(false);
+    openPlayer(queueIndex, true, 0);
+    return;
+  }
+  needGesture = false;
+  Player.toggle();
+  setPlayGate(false);
+  updateChrome();
 }
 
-function openPlaylists() {
-  const lists = playlistsLoad();
-  renderList('Playlists', lists.map(p => ({
-    label: p.name,
-    sub: (p.videos || []).length + ' videos',
-    onPick: () => {
-      skipIds = {};
-      prefetched = {};
-      const vids = maybeShuffle(p.videos || []);
-      queue = vids.map(v => Object.assign({}, v, { _listTitle: p.name }));
-      if (!queue.length) return;
-      openPlayer(0, true);
+/* Drops the guarded exit and, if its prompt is still up, the prompt too. */
+function disarmLeave() {
+  if (leaveArmedAt && ($('#toast') || {}).textContent === LEAVE_PROMPT) hideToast(true);
+  leaveArmedAt = 0;
+}
+
+/* Left is guarded: the first one shows the chrome and asks; a second within
+   2.5s leaves. System Back (a back key, or WP3's popstate) leaves at once. */
+function guardedLeave() {
+  const now = Date.now();
+  if (leaveArmedAt && now - leaveArmedAt < LEAVE_WINDOW_MS) {
+    leaveArmedAt = 0;
+    leavePlayer();
+    return;
+  }
+  leaveArmedAt = now;
+  chromeShow();
+  showToast(LEAVE_PROMPT, 'info', LEAVE_WINDOW_MS);
+}
+
+function leavePlayer() {
+  leaveArmedAt = 0;
+  showToast('');
+  goBack();
+}
+
+/* ---- Up next and the end of the list --------------------------------- */
+
+function startUpNext(n) {
+  cancelUpNext();
+  const v = queue[n];
+  if (!v) return;
+  upNextIdx = n;
+  upNextLeft = UPNEXT_S;
+  setText('#upnext-title', 'Up next: ' + (v.title || 'YouTube video'));
+  setText('#upnext-count', String(upNextLeft));
+  if (screens.player) screens.player.classList.add('upnext');
+  setPlayGate(false);
+  chromeShow();
+  upNextTimer = setInterval(function () {
+    upNextLeft -= 1;
+    if (upNextLeft <= 0) {
+      playUpNext();
+      return;
+    }
+    setText('#upnext-count', String(upNextLeft));
+  }, 1000);
+}
+
+function playUpNext() {
+  const n = upNextIdx;
+  cancelUpNext();
+  if (n >= 0 && queue[n]) openPlayer(n, true, resumeAt(queue[n].id));
+}
+
+function cancelUpNext() {
+  upNextPending = -1;
+  if (upNextTimer) clearInterval(upNextTimer);
+  upNextTimer = 0;
+  upNextIdx = -1;
+  if (screens.player) screens.player.classList.remove('upnext');
+}
+
+function showFinished() {
+  cancelUpNext();
+  finished = true;
+  setLoading(false);
+  setPlayGate(true, nowPlaying && nowPlaying.title, 'Finished', 'Pinch to replay · swipe left to exit');
+  const scr = screens.player;
+  if (scr) scr.classList.add('chrome-on');
+  armChromeHide(FINISHED_HOLD_MS);
+  queuePlayerPaint();
+}
+
+/* ---- Player menu: Down opens it over the dimmed video ------------------ */
+
+function renderPlayerMenu() {
+  const n = queue.length > 1 ? nextIndex(false) : -1;
+  const nextRow = document.querySelector('#player-menu [data-act="next"]');
+  if (nextRow) nextRow.classList.toggle('pm-off', n < 0);
+  setText('#pm-next', n >= 0 ? (n + 1) + ' of ' + queue.length : '');
+  setText('#pm-speed', prefs ? prefs.speedLabel() : '1x');
+  // A policy mute is silent whatever the pref says, so the row reads Off.
+  const policyMuted = typeof Player !== 'undefined' && Player.mutedByPolicy();
+  setText('#pm-sound', policyMuted || (sound && !sound.enabled()) ? 'Off' : 'On');
+  setText('#pm-picture', prefs && prefs.audioOnly() ? 'Audio only' : 'Video');
+  const mins = prefs ? prefs.sleep() : 0;
+  setText('#pm-sleep', mins ? (prefs.sleepLabel ? prefs.sleepLabel() : mins + 'm') : 'Off');
+}
+
+function armMenuIdle() {
+  if (menuTimer) clearTimeout(menuTimer);
+  menuTimer = setTimeout(function () {
+    menuTimer = 0;
+    closePlayerMenu();
+  }, MENU_IDLE_MS);
+}
+
+function openPlayerMenu() {
+  const m = $('#player-menu');
+  if (!m) return;
+  renderPlayerMenu();
+  m.classList.remove('hidden');
+  if (screens.player) screens.player.classList.add('menu-open');
+  const first = m.querySelector('[data-act="next"]');
+  if (first) first.focus();
+  armMenuIdle();
+  queuePlayerPaint();
+}
+
+function closePlayerMenu() {
+  const m = $('#player-menu');
+  if (menuTimer) clearTimeout(menuTimer);
+  menuTimer = 0;
+  if (!m || m.classList.contains('hidden')) return;
+  m.classList.add('hidden');
+  if (screens.player) screens.player.classList.remove('menu-open');
+  const a = document.activeElement;
+  if (a && m.contains(a) && a.blur) a.blur();
+  // A video that ended while the menu was open gets its full Up next count now.
+  const pending = upNextPending;
+  upNextPending = -1;
+  if (current === 'player' && pending >= 0 && queue[pending]) startUpNext(pending);
+  else if (current === 'player') chromeShow();
+}
+
+function menuKey(k) {
+  const m = $('#player-menu');
+  const rows = Array.prototype.slice.call(m.querySelectorAll('.pm-row'));
+  let i = rows.indexOf(document.activeElement);
+  if (i < 0) i = 0;
+  armMenuIdle();
+  if (k === 'left' || k === 'back') { closePlayerMenu(); return; }
+  if (k === 'up') { rows[Math.max(0, i - 1)].focus(); return; }
+  if (k === 'down') { rows[Math.min(rows.length - 1, i + 1)].focus(); return; }
+  if (k === 'right' && !rows[i].classList.contains('pm-cycle')) return;
+  menuAct(rows[i]);
+}
+
+/* Values apply live through Player.applyAll(); playback is never rebuilt. */
+function menuAct(row) {
+  const act = row && row.getAttribute('data-act');
+  const live = function () {
+    if (typeof Player !== 'undefined' && Player.applyAll) Player.applyAll();
+    renderPlayerMenu();
+    updateChrome();
+  };
+  // Rows that change the video drop a pending Up next instead of flashing it.
+  if (act === 'next' || act === 'prev' || act === 'restart') upNextPending = -1;
+  if (act === 'next') {
+    closePlayerMenu();
+    playNext();
+  } else if (act === 'prev') {
+    closePlayerMenu();
+    playPrev();
+  } else if (act === 'restart') {
+    closePlayerMenu();
+    restartVideo();
+  } else if (act === 'speed' && prefs) {
+    prefs.cycleSpeed();
+    live();
+  } else if (act === 'sound' && sound) {
+    if (typeof Player !== 'undefined' && Player.mutedByPolicy()) {
+      // Like a pinch: one press turns sound on (the arbiter already ran
+      // Player.unlock inside this gesture) and keeps the pref on.
+      sound.setEnabled(true);
+      needGesture = false;
+      Player.unmute();
+      if (/^Sound off/.test(($('#toast') || {}).textContent || '')) hideToast();
+    } else {
+      sound.setEnabled(!sound.enabled());
+    }
+    live();
+  } else if (act === 'picture' && prefs) {
+    prefs.setAudioOnly(!prefs.audioOnly());
+    live();
+  } else if (act === 'sleep' && prefs) {
+    prefs.cycleSleep();
+    armSleep();
+    live();
+  }
+}
+
+/* Recents and Playlists read storage on every render, not once at open:
+   Back onto them after a play or a push shows what is stored now. entry.videos
+   follows, so navPopTo can still land on the row that was playing. */
+function openRecents() {
+  navTo({
+    name: 'list', kind: 'recents', videos: recentsLoad(),
+    render: function (entry) {
+      const list = entry.videos = recentsLoad();
+      if (!list.length) {
+        renderList('Recents', [], 'Nothing played yet. Send a link from your iPhone, or pick a channel.',
+          'recents', { label: 'Open Channels', onPick: () => openChannels() });
+        return;
+      }
+      showVideoList('Recents', list, 'recents');
     },
-  })), 'Send a playlist from your iPhone. It stays here after that.', () => show('home'));
+  });
 }
 
-function openChannels(page) {
+/* A saved playlist opens its contents (Play all plus the rows), the same as a
+   channel does, instead of starting to play on the pinch. */
+function openPlaylists() {
+  navTo({
+    name: 'list', kind: 'playlists',
+    render: function () {
+      const lists = playlistsLoad();
+      renderList('Playlists', lists.map(p => ({
+        key: 'pl:' + p.name,
+        count: true,
+        label: p.name,
+        sub: plural((p.videos || []).length, 'video'),
+        onPick: () => navVideoList(p.name, p.videos || [], 'playlist'),
+      })), 'Send a playlist from your iPhone. It stays here after that.', 'playlists',
+      { label: 'Pair your iPhone', sub: 'Then send a playlist from the app', onPick: () => openPhone() });
+    },
+  });
+}
+
+/* Channel pages replace the current entry: Back from page 2 goes where the
+   wearer was before Channels, not to page 1. */
+function openChannels(page, replace) {
+  const p = Math.max(0, Number(page) || 0);
+  navTo({ name: 'list', kind: 'channels', render: function () { renderChannels(p); } },
+    { replace: !!replace });
+}
+
+function renderChannels(page) {
   channelPage = Math.max(0, Number(page) || 0);
   const all = channelsLoad();
   const start = channelPage * CHANNEL_PAGE;
   const slice = all.slice(start, start + CHANNEL_PAGE);
   const items = slice.map(ch => ({
+    key: ch.id,
+    count: true,
     label: ch.name,
-    sub: 'Latest videos',
     onPick: () => loadChannel(ch),
   }));
   if (start + CHANNEL_PAGE < all.length) {
     items.push({
+      key: 'more-channels',
       label: 'More channels',
       sub: (all.length - start - CHANNEL_PAGE) + ' more',
-      onPick: () => openChannels(channelPage + 1),
+      onPick: () => openChannels(channelPage + 1, true),
     });
   } else if (channelPage > 0) {
     items.push({
+      key: 'first-page',
       label: 'First page',
-      sub: all.length + ' channels',
-      onPick: () => openChannels(0),
+      sub: plural(all.length, 'channel'),
+      onPick: () => openChannels(0, true),
     });
   }
-  renderList(
-    'Channels',
-    items,
-    'Add channels on your iPhone. They show up here.',
-    () => {
-      if (channelPage > 0) openChannels(channelPage - 1);
-      else show('home');
-    },
-    channelPage > 0 ? 'Previous' : 'Back',
-    'channels'
-  );
+  renderList('Channels', items, 'Add channels on your iPhone. They show up here.', 'channels');
+  // The counter reads the row's place in the whole channel list, not the page.
+  const box = $('#list-items');
+  box.dataset.countBase = start;
+  box.dataset.countTotal = all.length;
+  listCount();
 }
 
-function loadChannel(ch, onBack) {
+/* The picked row spins while the feed loads; the video list opens only if
+   the wearer is still where they picked it (navGen unchanged). */
+function loadChannel(ch) {
+  if (feedWait === ch.id) return;
   feedWait = ch.id;
-  setStatus('Loading ' + ch.name + '...');
+  const gen = navGen;
+  // Only the row actually loading spins: a newer pick abandons the older one.
+  [].forEach.call(document.querySelectorAll('#list-items .is-loading'), rowLoaded);
+  const row = rowLoading(ch.id);
+  if (!row) setStatus('Loading ' + ch.name + '...');
+  function stale() {
+    if (feedWait === ch.id && gen === navGen) return false;
+    rowLoaded(row);
+    return true;
+  }
   function attempt() {
-    if (feedWait !== ch.id) return;
+    if (stale()) return;
     fetch('/api/feed?channel=' + encodeURIComponent(ch.id))
       .then(r => r.json())
       .then(d => {
-        if (feedWait !== ch.id) return;
+        if (stale()) return;
         if (!d.ok) {
           feedHealth = d.error || 'feed failed';
           if (isNetErr(d.error)) {
@@ -1159,20 +3034,24 @@ function loadChannel(ch, onBack) {
             setTimeout(attempt, RETRY_MS);
             return;
           }
+          feedWait = '';
+          rowLoaded(row);
           setStatus(d.error || 'Could not load that channel.', true);
           return;
         }
         setOffline(false);
-        feedHealth = 'ok · ' + (d.videos || []).length + ' videos';
+        feedHealth = 'ok · ' + plural((d.videos || []).length, 'video');
         const videos = (d.videos || []).map(v => ({
           id: v.id,
           title: v.title,
           channel: v.channel || ch.name,
           thumb: v.thumb,
+          duration: v.duration || '',
         }));
-        showVideoList(ch.name, videos, onBack || (() => openChannels(channelPage)));
+        navVideoList(ch.name, videos, 'channel');
       })
       .catch(e => {
+        if (stale()) return;
         feedHealth = String((e && e.message) || e);
         setOffline(true);
         setTimeout(attempt, RETRY_MS);
@@ -1184,9 +3063,16 @@ function loadChannel(ch, onBack) {
 /* ---- Search ------------------------------------------------------------
 
    The glasses have no keyboard. The Neural Band gives four directions and a
-   pinch, which is exactly enough to drive a letter grid, so that is what this
-   is: a 10-wide grid the wearer walks with the D-pad. Recent queries sit above
-   it because re-running a search should never cost 12 pinches. */
+   pinch, so the screen is a stack of cursor rows the band walks:
+     row -2   the native search field. A pinch on it opens the system composer
+              (dictation, handwriting, keyboard) on firmware v127 and later.
+     row -1   chips: the 4 most recent searches, or up to 4 suggestions once
+              two letters are typed. Re-running a search is pinch, Up, pinch.
+     rows 0-3 a 10-wide letter grid, the fallback when there is no composer.
+     row 4    actions: Search | Delete | Clear | Back.
+   The cursor is a class (.kb-on), not DOM focus, except on the field, which
+   needs real focus for the composer. Up and Down never wrap; Left and Right
+   wrap within a row. Left with an empty field at the left edge goes back. */
 
 const KEY_ROWS = [
   'ABCDEFGHIJ'.split(''),
@@ -1195,117 +3081,444 @@ const KEY_ROWS = [
   '456789'.split('').concat([' ']),
 ];
 const KEY_ACTIONS = [
-  { label: 'Back', act: 'back', wide: true },
+  { label: 'Search', act: 'go', wide: true, primary: true },
   { label: 'Delete', act: 'del', wide: true },
   { label: 'Clear', act: 'clear', wide: true },
-  { label: 'Search', act: 'go', wide: true, primary: true },
+  { label: 'Back', act: 'back', wide: true },
 ];
+const KB_INPUT_ROW = -2;
+const KB_CHIP_ROW = -1;
+const KB_MAX = 60;
+const SUGGEST_DEBOUNCE_MS = 300;
+const SUGGEST_TIMEOUT_MS = 3000;
 
 let typed = '';
 let keyRow = 0;
 let keyCol = 0;
+// Where the cursor sits across the row (0-1). Rows have 10, 7 and 4 keys, so
+// moving between them by position, and remembering it, makes Down then Up
+// come back to the same key.
+let keyX = 0.05;
+let chipIdx = 0;
+let kbKeys = null;
+let kbChipsShown = '';
+let kbBlurring = false;
+let suggestFor = '';
+let suggestList = [];
+let suggestTimer = 0;
+let suggestCtl = null;
+// An answer that came in while the cursor sat on the chips row: applying it
+// would swap the chip under the cursor for a different query, so it waits
+// until the cursor leaves the row.
+let suggestHeld = null;
 
 function keyGrid() {
   return KEY_ROWS.concat([KEY_ACTIONS.map(a => a.label)]);
 }
 
-function renderSearch() {
+function kbInput() {
+  return $('#kb-input');
+}
+
+/* The composer cannot type ' " _ [ ] and the search does not need them. */
+function cleanQuery(s) {
+  return String(s || '').replace(/['"_[\]]/g, '').toUpperCase().slice(0, KB_MAX);
+}
+
+/* Suggestions replace the recents once two letters are typed and an answer
+   for this prefix is in. Anything else (no answer yet, offline, refused)
+   shows recents, so a failure is silent. */
+function searchChips() {
+  const q = typed.trim().toLowerCase();
+  if (q.length >= 2 && suggestList.length && suggestFor && q.indexOf(suggestFor) === 0) {
+    return { kind: 'suggest', items: suggestList.slice(0, 4) };
+  }
+  return { kind: 'recent', items: queriesLoad().slice(0, 4) };
+}
+
+/* The keys never change, so build them once and only move the .kb-on class
+   afterwards: a full rebuild per swipe is wasted work on the glasses' CPU. */
+function buildSearchGrid() {
   const box = $('#kb-grid');
-  if (!box) return;
+  if (!box) return null;
   box.innerHTML = '';
   const grid = keyGrid();
-  grid.forEach((row, r) => {
+  return grid.map((row, r) => {
     const line = document.createElement('div');
     line.className = 'kb-row' + (r === grid.length - 1 ? ' kb-actions' : '');
-    row.forEach((cell, c) => {
+    const keys = row.map((cell, c) => {
       const b = document.createElement('button');
       const action = r === grid.length - 1 ? KEY_ACTIONS[c] : null;
       b.className = 'kb-key' +
-        (r === keyRow && c === keyCol ? ' kb-on' : '') +
         (action && action.primary ? ' kb-go' : '') +
         (action ? ' kb-wide' : '');
+      b.tabIndex = -1;
       b.textContent = cell === ' ' ? 'Space' : cell;
       if (cell === ' ') b.classList.add('kb-space');
-      b.addEventListener('click', () => { keyRow = r; keyCol = c; pressKey(); });
+      b.addEventListener('click', () => {
+        kbSetRow(r);
+        keyCol = c;
+        keyX = (c + 0.5) / row.length;
+        pressKey();
+      });
       line.appendChild(b);
+      return b;
     });
     box.appendChild(line);
+    return keys;
   });
-  const field = $('#kb-text');
-  if (field) {
-    field.textContent = typed || 'Type a search';
-    field.classList.toggle('kb-empty', !typed);
-  }
-  const recents = $('#kb-recent');
-  if (recents) {
-    recents.innerHTML = '';
-    queriesLoad().slice(0, 4).forEach(q => {
+}
+
+/* A suggestion repeats what is already typed; once that is long, show it
+   from the last typed word so the part that differs is what fits. */
+function chipLabel(text, kind) {
+  const q = typed.toLowerCase();
+  if (kind !== 'suggest' || q.length < 12 || text.toLowerCase().indexOf(q) !== 0) return text;
+  const cut = q.lastIndexOf(' ') + 1;
+  return cut > 0 ? '…' + text.slice(cut) : text;
+}
+
+function renderSearchChips(chips) {
+  const box = $('#kb-chips');
+  if (!box) return;
+  const labels = chips.items.map(t => chipLabel(t, chips.kind));
+  const sig = chips.kind + '\n' + chips.items.join('\n') + '\n' + labels.join('\n');
+  if (sig !== kbChipsShown) {
+    kbChipsShown = sig;
+    box.innerHTML = '';
+    chips.items.forEach((text, i) => {
       const b = document.createElement('button');
-      b.className = 'kb-recent-btn';
-      b.textContent = q;
-      b.addEventListener('click', () => { typed = q; runSearch(); });
-      recents.appendChild(b);
+      b.className = 'kb-chip';
+      b.tabIndex = -1;
+      b.textContent = labels[i];
+      b.addEventListener('click', () => { typed = text; runSearch(); });
+      box.appendChild(b);
     });
-    recents.classList.toggle('hidden', !queriesLoad().length);
+    // A chip is as wide as its label (flex 0 0 auto), so its own width says
+    // nothing about the room it has: fit against its max-width instead.
+    const first = box.firstElementChild;
+    let slot;
+    if (first) {
+      const cs = getComputedStyle(first);
+      const px = k => parseFloat(cs[k]) || 0;
+      const w = px('maxWidth') - px('paddingLeft') - px('paddingRight') -
+        px('borderLeftWidth') - px('borderRightWidth');
+      if (w > 0) slot = { w: w, font: cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily };
+    }
+    fitText([].map.call(box.children, (b, i) => [b, labels[i], 1]), slot);
   }
+  box.classList.toggle('kb-suggest', chips.kind === 'suggest');
+  if (chipIdx > chips.items.length - 1) chipIdx = Math.max(0, chips.items.length - 1);
+  const onChips = keyRow === KB_CHIP_ROW;
+  Array.prototype.forEach.call(box.children, (b, i) => b.classList.toggle('kb-on', onChips && i === chipIdx));
+  // One row, scrolled sideways so the chip under the cursor is always whole
+  // and clear of the 32px fades that say more chips sit past an edge.
+  const on = onChips ? box.children[chipIdx] : null;
+  if (!on) box.scrollLeft = 0;
+  else if (on.offsetLeft < box.scrollLeft + 36) box.scrollLeft = Math.max(0, on.offsetLeft - 36);
+  else if (on.offsetLeft + on.offsetWidth > box.scrollLeft + box.clientWidth - 36) {
+    box.scrollLeft = on.offsetLeft + on.offsetWidth - box.clientWidth + 36;
+  }
+  box.classList.toggle('kb-fade-l', box.scrollLeft > 0);
+  box.classList.toggle('kb-fade-r', box.scrollLeft + box.clientWidth < box.scrollWidth - 1);
+}
+
+function renderSearch() {
+  if (suggestHeld && keyRow !== KB_CHIP_ROW) {
+    const h = suggestHeld;
+    suggestHeld = null;
+    if (typed.trim().toLowerCase() === h.q) { suggestFor = h.q; suggestList = h.list; }
+  }
+  if (!kbKeys || !kbKeys[0][0].isConnected) kbKeys = buildSearchGrid();
+  if (!kbKeys) return;
+  const chips = searchChips();
+  if (keyRow === KB_CHIP_ROW && !chips.items.length) kbSetRow(0);
+  kbKeys.forEach((row, r) => row.forEach((b, c) => {
+    b.classList.toggle('kb-on', r === keyRow && c === keyCol);
+  }));
+  const input = kbInput();
+  if (input) {
+    if (cleanQuery(input.value) !== cleanQuery(typed)) input.value = typed;
+    // Show the end of the query, the part just typed, not the start, and
+    // fade the cut-off start instead of slicing a letter in half.
+    if (document.activeElement !== input) input.scrollLeft = input.scrollWidth;
+    input.classList.toggle('kb-long', input.scrollWidth > input.clientWidth + 1);
+  }
+  const field = $('#kb-field');
+  if (field) field.classList.toggle('kb-on', keyRow === KB_INPUT_ROW);
+  // The hint shares the chips row: settle it first so the chip scroll and
+  // edge fades below are worked out against the row's final width.
+  const hint = $('#kb-hint');
+  if (hint) {
+    hint.classList.toggle('hidden',
+      !(chips.kind === 'suggest' && typed.trim().length >= 3 && keyRow >= 0));
+  }
+  renderSearchChips(chips);
+}
+
+function kbFocusInput() {
+  const input = kbInput();
+  if (!input) return;
+  try { input.focus({ preventScroll: true }); } catch (e) { input.focus(); }
+  const n = input.value.length;
+  try { input.setSelectionRange(n, n); } catch (e) { /* not supported */ }
+}
+
+/* Our own blur must not count as the composer committing text: Chrome fires
+   'change' on blur when the value changed while focused. */
+function kbBlurInput() {
+  const input = kbInput();
+  if (!input || document.activeElement !== input) return;
+  kbBlurring = true;
+  try { input.blur(); } finally { kbBlurring = false; }
+}
+
+function kbSetRow(r) {
+  const was = keyRow;
+  keyRow = r;
+  if (r === KB_CHIP_ROW) chipIdx = 0;
+  if (r >= 0) {
+    const n = keyGrid()[r].length;
+    keyCol = Math.max(0, Math.min(n - 1, Math.floor(keyX * n)));
+  }
+  if (r === KB_INPUT_ROW) kbFocusInput();
+  else if (was === KB_INPUT_ROW) kbBlurInput();
 }
 
 function moveKey(dr, dc) {
   const grid = keyGrid();
-  keyRow = (keyRow + dr + grid.length) % grid.length;
+  if (dr) {
+    let r = keyRow + dr;
+    if (r === KB_CHIP_ROW && !searchChips().items.length) r += dr;
+    // No vertical wrap: Up from the field and Down from the actions stay put,
+    // so a stray swipe never lands on Back and throws the query away.
+    if (r < KB_INPUT_ROW || r > grid.length - 1) return;
+    kbSetRow(r);
+    renderSearch();
+    return;
+  }
+  if (keyRow === KB_INPUT_ROW) return;
+  if (keyRow === KB_CHIP_ROW) {
+    const n = searchChips().items.length;
+    if (!n) return;
+    chipIdx = (chipIdx + dc + n) % n;
+    renderSearch();
+    return;
+  }
   const row = grid[keyRow];
-  if (dr !== 0) keyCol = Math.min(keyCol, row.length - 1);
-  else keyCol = (keyCol + dc + row.length) % row.length;
+  keyCol = (keyCol + dc + row.length) % row.length;
+  keyX = (keyCol + 0.5) / row.length;
+  renderSearch();
+}
+
+/* Left is the app-wide back gesture. Here it only goes back from the left
+   edge (field or A) with nothing typed; anywhere else it moves the cursor, so
+   it can never throw a query away. The chips row wraps both ways, like Right. */
+function searchLeftIsBack() {
+  if (typed) return false;
+  if (keyRow === KB_INPUT_ROW) return true;
+  if (keyRow === KB_CHIP_ROW) return false;
+  return keyRow === 0 && keyCol === 0;
+}
+
+function leaveSearch() {
+  kbBlurInput();
+  suggestCancel();
+  goBack();
+}
+
+function searchTyped() {
+  suggestSchedule();
   renderSearch();
 }
 
 function pressKey() {
+  if (keyRow === KB_INPUT_ROW) {
+    if (typed.trim()) runSearch();
+    else kbFocusInput();
+    return;
+  }
+  if (keyRow === KB_CHIP_ROW) {
+    const pick = searchChips().items[chipIdx];
+    if (pick) { typed = pick; runSearch(); }
+    return;
+  }
   const grid = keyGrid();
   if (keyRow === grid.length - 1) {
     const action = KEY_ACTIONS[keyCol];
     if (!action) return;
-    if (action.act === 'back') { show('home'); return; }
+    if (action.act === 'back') { leaveSearch(); return; }
+    if (action.act === 'go') { runSearch(); return; }
     if (action.act === 'del') typed = typed.slice(0, -1);
     if (action.act === 'clear') typed = '';
-    if (action.act === 'go') { runSearch(); return; }
-    renderSearch();
+    searchTyped();
     return;
   }
-  if (typed.length < 60) typed += grid[keyRow][keyCol];
+  if (typed.length < KB_MAX) typed += grid[keyRow][keyCol];
+  searchTyped();
+}
+
+/* Text from the field: the composer (dictation, handwriting, on-screen
+   keyboard) or a real keyboard. Mid-composition the value is left alone so
+   the IME is not disturbed; stripped characters are removed once it ends. */
+function searchFromInput(e) {
+  const input = kbInput();
+  if (!input || current !== 'search') return;
+  const next = cleanQuery(input.value);
+  if (!(e && e.isComposing) && next !== input.value.toUpperCase().slice(0, KB_MAX)) {
+    input.value = next;
+  }
+  if (document.activeElement === input && keyRow !== KB_INPUT_ROW) keyRow = KB_INPUT_ROW;
+  if (next !== typed) {
+    typed = next;
+    suggestSchedule();
+  }
   renderSearch();
 }
 
+function suggestCancel() {
+  suggestHeld = null;
+  clearTimeout(suggestTimer);
+  suggestTimer = 0;
+  if (suggestCtl) {
+    try { suggestCtl.abort(); } catch (e) { /* already done */ }
+    suggestCtl = null;
+  }
+}
+
+function suggestSchedule() {
+  const q = typed.trim().toLowerCase();
+  suggestCancel();
+  if (q.length < 2 || q === suggestFor) return;
+  suggestTimer = setTimeout(function () { suggestFetch(q); }, SUGGEST_DEBOUNCE_MS);
+}
+
+function suggestTake(q, list) {
+  if (keyRow === KB_CHIP_ROW) { suggestHeld = { q: q, list: list }; return; }
+  suggestHeld = null;
+  suggestFor = q;
+  suggestList = list;
+  renderSearch();
+}
+
+function suggestFetch(q) {
+  suggestTimer = 0;
+  if (current !== 'search') return;
+  // navGen is the ghost-load guard (WP3): an answer for a screen the wearer
+  // has navigated away from, or a prefix they typed past, is dropped.
+  const gen = navGen;
+  const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+  suggestCtl = ctl;
+  const killer = setTimeout(function () { if (ctl) ctl.abort(); }, SUGGEST_TIMEOUT_MS);
+  const stale = () => navGen !== gen ||
+    current !== 'search' || typed.trim().toLowerCase() !== q;
+  fetch('/api/suggest?q=' + encodeURIComponent(q), ctl ? { signal: ctl.signal } : undefined)
+    .then(r => r.json())
+    .then(d => {
+      if (stale()) return;
+      suggestTake(q, d && d.ok && Array.isArray(d.suggestions)
+        ? d.suggestions.filter(s => typeof s === 'string' && s.trim())
+          .map(s => s.trim().slice(0, 80)).slice(0, 4)
+        : []);
+    })
+    .catch(function () {
+      // Timed out or offline: fall back to recents, silently. A newer
+      // keystroke cancelling this request is not a failure.
+      if (suggestCtl !== ctl || stale()) return;
+      suggestTake(q, []);
+    })
+    .then(function () {
+      clearTimeout(killer);
+      if (suggestCtl === ctl) suggestCtl = null;
+    });
+}
+
+/* Opening Search from Home pushes a new nav entry and starts empty. Coming
+   back to it from its own results is a nav-stack pop, which redraws the same
+   entry: that keeps the query and parks the cursor on the Search key. Back
+   from anything else stacked on it (a phone push, say) keeps the query and
+   puts the cursor back where the wearer left it. With nothing typed it starts
+   fresh on A, where Left still goes back and a pinch types. */
 function openSearch() {
-  typed = '';
-  keyRow = 0;
-  keyCol = 0;
-  show('search');
-  renderSearch();
+  navTo({
+    name: 'search',
+    render: function (entry) {
+      const keep = !!entry.shown && !!typed.trim();
+      const cursor = keep && !entry.ranSearch ? entry.cursor : null;
+      entry.shown = true;
+      entry.ranSearch = false;
+      searchScreen(keep, cursor);
+    },
+  });
 }
 
+function searchScreen(keep, cursor) {
+  kbBlurInput();
+  suggestCancel();
+  if (keep && cursor) {
+    keyRow = cursor.row;
+    keyCol = cursor.col;
+    keyX = cursor.x;
+  } else if (keep) {
+    keyRow = keyGrid().length - 1;
+    keyCol = 0;
+    keyX = 0.05;
+  } else {
+    typed = '';
+    suggestFor = '';
+    suggestList = [];
+    keyRow = 0;
+    keyCol = 0;
+    keyX = 0.05;
+  }
+  chipIdx = keep && cursor ? (cursor.chip || 0) : 0;
+  const input = kbInput();
+  if (input && !keep) input.value = '';
+  show('search');
+  // Only the grid cursor is lit: nothing on this screen holds DOM focus.
+  if (document.activeElement && document.activeElement !== document.body &&
+      document.activeElement.blur) document.activeElement.blur();
+  renderSearch();
+  if (keep && cursor && keyRow === KB_INPUT_ROW) kbFocusInput();
+  if (keep) suggestSchedule();
+}
+
+/* Results open as their own entry right away ('Searching...'), and fill in
+   only if the wearer has not navigated since (navGen). */
 function runSearch() {
   const q = typed.trim();
   if (!q) return;
+  kbBlurInput();
+  suggestCancel();
   lastQuery = q;
   queriesAdd(q);
-  setStatus('Searching ' + q + '...');
-  renderList('Search', [], 'Searching...', () => openSearch(), 'Back', 'search');
+  // Back from these results parks the cursor on the Search key (WP8.4).
+  if (navTop() && navTop().name === 'search') navTop().ranSearch = true;
+  const entry = {
+    name: 'list', kind: 'search', videos: null, empty: 'Searching...',
+    render: function () {
+      if (entry.videos && entry.videos.length) showVideoList('Search: ' + q, entry.videos, 'search');
+      else renderList(entry.videos ? 'Search: ' + q : 'Search', [], entry.empty, 'search');
+    },
+  };
+  navTo(entry);
+  const gen = navGen;
   fetch('/api/search?q=' + encodeURIComponent(q) + '&limit=20')
     .then(r => r.json())
     .then(d => {
-      if (!d.ok || !(d.videos || []).length) {
-        setStatus('');
-        renderList('Search: ' + q, [],
-          d.error || 'Nothing found for that.', () => openSearch(), 'Back', 'search');
-        return;
-      }
+      if (gen !== navGen) return;
       setStatus('');
-      setOffline(false);
-      showVideoList('Search: ' + q, d.videos, () => openSearch(), 'search');
+      if (d.ok && (d.videos || []).length) setOffline(false);
+      entry.videos = d.ok ? (d.videos || []) : [];
+      entry.empty = d.error || 'Nothing found for that.';
+      navRender(entry, false);
     })
     .catch(e => {
+      if (gen !== navGen) return;
       setOffline(true);
-      renderList('Search: ' + q, [], netText(e), () => openSearch(), 'Back', 'search');
+      entry.videos = [];
+      entry.empty = netText(e);
+      navRender(entry, false);
     });
 }
 
@@ -1335,20 +3548,41 @@ function libraryFetch() {
     });
 }
 
+/* Library is one nav entry that redraws itself as the fetch lands, but only
+   while the wearer is still on it (navGen). A failure offers 'Try again'. */
 function openLibrary() {
-  if (!ytSession) {
-    renderList('Library', [],
-      'Tap "Send sign-in to glasses" in the iPhone app first.', () => show('home'));
-    return;
-  }
-  if (library) {
-    renderLibrary();
-    return;
-  }
-  renderList('Library', [], 'Loading your YouTube...', () => show('home'));
-  libraryFetch().then(renderLibrary).catch(e => {
+  const entry = {
+    name: 'list', kind: 'library',
+    render: function () {
+      if (!ytSession) {
+        renderList('Library', [],
+          'Tap "Send sign-in to glasses" in the iPhone app first.', 'library');
+        return;
+      }
+      if (library) { renderLibrary(); return; }
+      if (libraryErr) {
+        renderList('Library', [], libraryErr, 'library', {
+          label: 'Try again',
+          onPick: () => { libraryErr = ''; libraryLoad(entry); },
+        });
+        return;
+      }
+      renderList('Library', [], 'Loading your YouTube...', 'library');
+    },
+  };
+  libraryErr = '';
+  navTo(entry);
+  if (ytSession && !library) libraryLoad(entry);
+}
+
+function libraryLoad(entry) {
+  const gen = navGen;
+  if (current === 'list' && navTop() === entry) navRender(entry, false);
+  libraryFetch().then(function () {
+    if (gen === navGen) navRender(entry, false);
+  }).catch(e => {
     libraryErr = String((e && e.message) || e);
-    renderList('Library', [], libraryErr, () => show('home'));
+    if (gen === navGen) navRender(entry, false);
   });
 }
 
@@ -1357,87 +3591,126 @@ function renderLibrary() {
   const items = [];
   if ((d.watchLater || []).length) {
     items.push({
+      key: 'lib:wl',
+      count: true,
       label: 'Watch later',
-      sub: d.watchLater.length + ' videos',
-      onPick: () => showVideoList('Watch later', d.watchLater, openLibrary),
+      sub: plural(d.watchLater.length, 'video'),
+      onPick: () => navVideoList('Watch later', d.watchLater, 'libvideos'),
     });
   }
   if ((d.likes || []).length) {
     items.push({
+      key: 'lib:likes',
+      count: true,
       label: 'Liked videos',
-      sub: d.likes.length + ' videos',
-      onPick: () => showVideoList('Liked videos', d.likes, openLibrary),
+      sub: plural(d.likes.length, 'video'),
+      onPick: () => navVideoList('Liked videos', d.likes, 'libvideos'),
     });
   }
-  (d.playlists || []).slice(0, 20).forEach(p => {
+  (d.playlists || []).forEach(p => {
     items.push({
+      key: 'lib:' + p.id,
+      count: true,
       label: p.name,
-      sub: p.count + ' videos',
+      sub: plural(p.count, 'video'),
       onPick: () => openLibraryPlaylist(p),
     });
   });
   if ((d.subscriptions || []).length) {
     items.push({
+      key: 'lib:subs',
+      count: true,
       label: 'Subscriptions',
-      sub: d.subscriptions.length + ' channels',
+      sub: plural(d.subscriptions.length, 'channel'),
       onPick: () => openSubs(),
     });
   }
   renderList('Library', items,
-    libraryErr || 'Nothing in your YouTube library yet.', () => show('home'), 'Back', 'library');
+    libraryErr || 'Nothing in your YouTube library yet.', 'library');
 }
 
 function openLibraryPlaylist(p) {
-  renderList(p.name, [], 'Loading...', openLibrary);
-  authFetch('/api/yt/playlist?id=' + encodeURIComponent(p.id))
-    .then(d => {
-      if (!d.ok || !(d.videos || []).length) {
-        renderList(p.name, [], d.error || 'That playlist is empty.', openLibrary);
-        return;
-      }
-      showVideoList(p.name, d.videos, openLibrary);
-    })
-    .catch(e => renderList(p.name, [], netText(e), openLibrary));
+  const entry = {
+    name: 'list', kind: 'libplaylist', videos: null, empty: 'Loading...',
+    failed: false,
+    render: function () {
+      if (entry.videos && entry.videos.length) showVideoList(p.name, entry.videos, 'libplaylist');
+      else renderList(p.name, [], entry.empty, 'libplaylist', entry.failed ? {
+        label: 'Try again',
+        onPick: () => { entry.failed = false; entry.videos = null; entry.empty = 'Loading...'; navRender(entry, false); load(); },
+      } : undefined);
+    },
+  };
+  navTo(entry);
+  // A failure offers 'Try again' (WP3.4), as the Library screen does; it does
+  // not promise a retry that never comes.
+  function load() {
+    const gen = navGen;
+    authFetch('/api/yt/playlist?id=' + encodeURIComponent(p.id))
+      .then(d => {
+        if (gen !== navGen) return;
+        entry.videos = d.ok ? (d.videos || []) : [];
+        entry.failed = !d.ok;
+        entry.empty = d.error || 'That playlist is empty.';
+        navRender(entry, false);
+      })
+      .catch(e => {
+        if (gen !== navGen) return;
+        entry.videos = [];
+        entry.failed = true;
+        entry.empty = isNetErr(String((e && e.message) || e || '')) ? 'No internet.' : netText(e);
+        navRender(entry, false);
+      });
+  }
+  load();
 }
 
 function openSubs() {
-  const subs = (library && library.subscriptions) || [];
-  renderList('Subscriptions', subs.map(ch => ({
-    label: ch.name,
-    sub: 'Latest videos',
-    thumb: ch.thumb || '',
-    onPick: () => loadChannel({ id: ch.id, name: ch.name }, openSubs),
-  })), 'No subscriptions found.', openLibrary, 'Back', 'subs');
-}
-
-/* ---- Queue -------------------------------------------------------------- */
-
-function openQueue() {
-  if (queue.length < 2) {
-    setStatus('Nothing queued.');
-    return;
-  }
-  const items = videoItems(queue, function (i) {
-    openPlayer(i, true, resumeAt(queue[i] && queue[i].id));
-  }).map((it, i) => Object.assign({}, it, {
-    label: (i === queueIndex ? '▶ ' : '') + it.label,
-  }));
-  renderList(queueTitle() + ' · queue', items, 'Nothing queued.',
-    () => show('home'), 'Back', 'queue');
+  navTo({
+    name: 'list', kind: 'subs',
+    render: function () {
+      const subs = (library && library.subscriptions) || [];
+      renderList('Subscriptions', subs.map(ch => ({
+        key: ch.id,
+        count: true,
+        label: ch.name,
+        thumb: ch.thumb || '',
+        onPick: () => loadChannel({ id: ch.id, name: ch.name }),
+      })), 'No subscriptions found.', 'subs');
+    },
+  });
 }
 
 function openPhone() {
-  show('phone');
+  navTo({ name: 'phone', render: function () { show('phone'); } });
   pairCode = pairCodeStored();
   pairLink = linkStored();
   if (pairKey()) {
-    $('#pair-code').textContent = pairCode || '······';
-    $('#pair-help').textContent = pairLink
-      ? 'Your iPhone stays linked on its own. This code is only for linking a new phone.'
-      : 'Type this code in the GlassTube iPhone app.';
+    renderPhone();
     startPairPoll();
+    // No default focus here (WP3 focusDefault): a stray pinch on arrival
+    // never lands on 'Link a different phone'.
   } else {
     newPairCode();
+  }
+}
+
+/* WP4: linked, the screen says so and keeps the code small; not linked, it
+   shows the big code and the three steps. */
+function renderPhone() {
+  const linked = pairLinked();
+  $('#pair-linked').classList.toggle('hidden', !linked);
+  $('#pair-code').classList.toggle('hidden', linked);
+  $('#pair-steps').classList.toggle('hidden', linked);
+  if (linked) {
+    $('#pair-last').textContent = lastPushInfo
+      ? lastPushText()
+      : 'Send a video from the iPhone app. It plays here on any screen.';
+    $('#pair-linked-code').textContent = pairCode ? 'Code ' + pairCode : '';
+    $('#pair-help').textContent = '';
+  } else {
+    $('#pair-code').textContent = pairCode || (pairKey() ? '······' : '------');
+    $('#pair-help').textContent = pairKey() ? 'Waiting for your iPhone…' : 'Getting a code…';
   }
 }
 
@@ -1446,50 +3719,136 @@ function newPairCode() {
     clearTimeout(pairMintTimer);
     pairMintTimer = 0;
   }
+  pairPairedSet(false);
+  if (current === 'phone') renderPhone();
   $('#pair-code').textContent = '------';
-  $('#pair-help').textContent = netOffline ? 'No internet. Retrying...' : 'Getting a code...';
-  fetch('/api/pair', { method: 'POST' })
+  $('#pair-help').textContent = netOffline ? offlineText() : 'Getting a code…';
+  // WP6: after an unlink, tell the server which link this code replaces, so
+  // the old phone hears it is no longer linked instead of pushing into a void.
+  const mint = pairReplaces
+    ? { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ replaces: pairReplaces }) }
+    : { method: 'POST' };
+  fetch('/api/pair', mint)
     .then(r => r.json())
     .then(d => {
+      if (d.ok && d.code) pairReplaces = '';
       if (!d.ok || !d.code) {
         pairState = d.error || 'pair failed';
         if (isNetErr(d.error)) {
-          setOffline(true);
-          $('#pair-help').textContent = 'No internet. Retrying...';
+          netFail();
+          $('#pair-help').textContent = offlineText();
           pairMintTimer = setTimeout(newPairCode, RETRY_MS);
           return;
         }
         $('#pair-help').textContent = d.error || 'Could not get a code. Check Diagnostics.';
         return;
       }
-      setOffline(false);
+      netOk();
       pairCode = d.code;
       pairCodeStore(pairCode);
       linkStore(d.token || '');
       pairState = 'code ' + pairCode;
       $('#pair-code').textContent = pairCode;
-      $('#pair-help').textContent = 'Type this code in the GlassTube iPhone app.';
+      $('#pair-help').textContent = 'Waiting for your iPhone…';
       updateHomePhoneHint();
       startPairPoll();
     })
     .catch(e => {
       pairState = netText(e).slice(0, 40);
-      setOffline(true);
-      $('#pair-help').textContent = 'No internet. Retrying...';
+      netFail();
+      $('#pair-help').textContent = offlineText();
       pairMintTimer = setTimeout(newPairCode, RETRY_MS);
     });
 }
 
+/* The poll loop is a setTimeout chain, not an interval: pollPair schedules
+   the next request only when the current one has finished, so at most one is
+   ever in flight. It runs whenever there is a key, link token or code. */
 function startPairPoll() {
   stopPairPoll();
-  if (!pairCode) return;
+  if (!pairKey()) return;
   pollPair();
-  pairTimer = setInterval(pollPair, PAIR_POLL_MS);
 }
 
 function stopPairPoll() {
-  if (pairTimer) clearInterval(pairTimer);
+  if (pairTimer) clearTimeout(pairTimer);
   pairTimer = null;
+  pollDueAt = 0;
+}
+
+/* Glasses or the phone's own HUD preview, for the server log and delivery. */
+function pollWho() {
+  const hook = !!(window.webkit && window.webkit.messageHandlers &&
+    window.webkit.messageHandlers.glasstube);
+  return (hook || /iPhone|iPad/i.test(navigator.userAgent)) ? 'preview' : 'hud';
+}
+
+function pollDelay() {
+  if (document.hidden) return POLL_HIDDEN_MS;
+  if (current === 'phone' || Date.now() - lastActiveAt < ACTIVE_WINDOW_MS) return POLL_ACTIVE_MS;
+  return POLL_IDLE_MS;
+}
+
+/* After a network or HTTP failure: 2s, 4s, 8s, then 15s, never faster than
+   the cadence the wearer's state already asks for. */
+function nextPollDelay() {
+  if (!pollFails) return pollDelay();
+  const back = POLL_BACKOFF_MS[Math.min(pollFails, POLL_BACKOFF_MS.length) - 1];
+  return Math.max(pollDelay(), back);
+}
+
+function schedulePoll(ms) {
+  if (pairTimer) clearTimeout(pairTimer);
+  pairTimer = null;
+  pollDueAt = 0;
+  if (!pairKey()) return;
+  const wait = Math.max(0, ms == null ? nextPollDelay() : ms);
+  pollDueAt = Date.now() + wait;
+  pairTimer = setTimeout(function () {
+    pairTimer = null;
+    pollDueAt = 0;
+    pollPair();
+  }, wait);
+}
+
+/* Poll as soon as possible. Resume events (visible, pageshow, focus, online)
+   tend to arrive together; the short delay folds them into one request, and a
+   request that started under a second ago already counts. */
+function pollNow() {
+  if (!pairKey()) return;
+  if (pollBusy) {
+    if (Date.now() - pollStartedAt > POLL_FRESH_MS) pollAgain = true;
+    return;
+  }
+  if (pairTimer && pollDueAt - Date.now() <= POLL_NOW_MS) return;
+  schedulePoll(POLL_NOW_MS);
+}
+
+/* The wearer just did something: a long idle wait shrinks to the active
+   cadence instead of running out first. */
+function pollSoonerIfIdle() {
+  if (pollBusy || !pairKey()) return;
+  const want = nextPollDelay();
+  if (!pairTimer || pollDueAt - Date.now() > want) schedulePoll(want);
+}
+
+/* Every 10s: if no poll has started for 30s while visible, the chain broke
+   somewhere. Abort a request stuck past its own timeout and start again. */
+function pollWatchdog() {
+  if (document.hidden || !pairKey()) return;
+  const since = Date.now() - pollStartedAt;
+  if (pollBusy) {
+    if (since > POLL_TIMEOUT_MS + 5000) {
+      if (pollCtrl) pollCtrl.abort();
+      else { pollBusy = false; schedulePoll(0); }
+    }
+    return;
+  }
+  if (since > WATCHDOG_STALL_MS) {
+    hudNote('poll-restart', { since: Math.round(since / 1000) });
+    schedulePoll(0);
+  }
 }
 
 /* What the HUD did with a push, posted to the server log next to the phone's
@@ -1509,21 +3868,127 @@ function hudNote(ev, extra) {
   } catch (e) { /* diagnostics only */ }
 }
 
+/* WP6: server-confirmed delivery. The glasses tell the server what happened to
+   the push they are tracking, and /api/push waits for it, so the phone says
+   'Playing on your glasses' only when they are. One push is tracked at a time:
+   the newest one. Each state goes out at most once, in order, and nothing is
+   sent after a terminal state. 'got' replaces the plain ack and, like 'missed',
+   consumes the push on the server. handlePush decides which one to send. */
+const DELIVERY_TERMINAL = { playing: 1, failed: 1, missed: 1 };
+let deliveryPush = null;
+let deliveryChain = Promise.resolve();
+
+function deliveryTrack(seq) {
+  deliveryPush = { seq: seq, id: '', ids: null, sent: {}, done: false };
+}
+
+/* Which video of the tracked push is on screen: the first one opened after it
+   arrived, or the next one a queue skips to before anything played. Only the
+   push's own videos (applyPush lists them) count: a Search or Recents video
+   opened after leaving it is not the phone's push. */
+function deliveryVideo(id) {
+  if (!deliveryPush || deliveryPush.done || !id) return;
+  if (!deliveryPush.ids || deliveryPush.ids.indexOf(id) < 0) return;
+  if (!deliveryPush.id || !deliveryPush.sent.playing) deliveryPush.id = id;
+}
+
+function deliveryFor(id) {
+  return !!(deliveryPush && !deliveryPush.done && deliveryPush.id && deliveryPush.id === id);
+}
+
+function deliveryReport(state, detail) {
+  const p = deliveryPush;
+  const code = pairKey();
+  if (!p || p.done || p.sent[state] || !code) return;
+  p.sent[state] = true;
+  if (DELIVERY_TERMINAL[state]) p.done = true;
+  const body = JSON.stringify({
+    code: code, ack: p.seq, state: state,
+    detail: detail ? String(detail).slice(0, 300) : '',
+    b: String(window.GLASSTUBE_BUILD || ''), who: pollWho(),
+  });
+  deliveryChain = deliveryChain.then(function () { return deliveryPost(body); });
+}
+
+/* One report, in order after the one before, but never holding up the next
+   for more than DELIVERY_POST_MS: a request that hangs is abandoned. */
+const DELIVERY_POST_MS = 8000;
+function deliveryPost(body) {
+  const ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+  return new Promise(function (resolve) {
+    const timer = setTimeout(function () {
+      if (ctrl) ctrl.abort();
+      resolve();
+    }, DELIVERY_POST_MS);
+    fetch('/api/pair', Object.assign({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body,
+    }, ctrl ? { signal: ctrl.signal } : {}))
+      .catch(function () { /* the server falls back to its own timeout */ })
+      .then(function () { clearTimeout(timer); resolve(); });
+  });
+}
+
+/* The one place a poll response is handled. Single flight: a call while a
+   request is out only asks for another one right after it. */
 function pollPair() {
-  if (!pairKey()) return;
-  fetch('/api/pair?code=' + encodeURIComponent(pairKey()))
-    .then(r => r.json())
+  const key = pairKey();
+  if (!key) return;
+  if (pollBusy) { pollAgain = true; return; }
+  if (pairTimer) clearTimeout(pairTimer);
+  pairTimer = null;
+  pollDueAt = 0;
+  pairKeyChanged();
+  pollBusy = true;
+  pollAgain = false;
+  pollStartedAt = Date.now();
+  const ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+  pollCtrl = ctrl;
+  const timeout = setTimeout(function () { if (ctrl) ctrl.abort(); }, POLL_TIMEOUT_MS);
+  const url = '/api/pair?code=' + encodeURIComponent(key) +
+    '&b=' + encodeURIComponent(window.GLASSTUBE_BUILD || '') +
+    '&i=' + instanceId + '&who=' + pollWho() +
+    '&vis=' + (document.hidden ? 'hidden' : 'visible');
+  let answered = false;
+  fetch(url, ctrl ? { signal: ctrl.signal } : {})
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
     .then(d => {
+      answered = true;
+      // The key changed while this was out (unlink, new code): not ours.
+      if (key !== pairKey()) return;
+      d = d || {};
       if (!d.ok) {
-        const dead = /expir|not active|not found|unknown/i.test(d.error || '');
-        pairState = dead ? 'code expired' : (d.error || 'pair failed');
-        if (current === 'phone') {
-          $('#pair-help').textContent = dead
-            ? 'That code expired. Getting a new one...'
-            : (d.error || 'Could not reach pairing.');
+        const dead = d.gone === true || /expir|not active|not found|unknown/i.test(d.error || '');
+        // A server that answers 'gone' is reachable, so not 'offline'.
+        if (dead) netOk();
+        else netFail();
+        // One dead answer is not proof: a server or database blip says the
+        // same. Wipe the link only after GONE_STRIKES answers over GONE_SPAN_MS.
+        if (dead) {
+          if (!goneStrikes) goneFirstAt = Date.now();
+          goneStrikes += 1;
         }
-        if (!dead) return;
+        const wipe = dead && goneStrikes >= GONE_STRIKES && Date.now() - goneFirstAt >= GONE_SPAN_MS;
+        pairState = wipe ? 'code expired'
+          : dead ? 'link not found · check ' + Math.min(goneStrikes, GONE_STRIKES) + '/' + GONE_STRIKES
+          : (d.error || 'pair failed');
+        lastPoll = { at: Date.now(), ok: false, text: pairState };
+        if (current === 'phone') {
+          $('#pair-help').textContent = wipe
+            ? 'That code expired. Getting a new one...'
+            : dead ? 'Checking your link…' : (d.error || 'Could not reach pairing.');
+        }
+        if (!wipe) return;
+        hudNote('pair-gone', { strikes: goneStrikes, error: String(d.error || '').slice(0, 80) });
+        goneStrikes = 0;
+        goneFirstAt = 0;
         stopPairPoll();
+        pairIgnoreUrl();
+        pairPairedSet(false);
         pairCodeStore('');
         linkStore('');
         pairCode = '';
@@ -1531,53 +3996,157 @@ function pollPair() {
         ensureListening();
         return;
       }
-      setOffline(false);
+      goneStrikes = 0;
+      goneFirstAt = 0;
+      lastPoll = { at: Date.now(), ok: true, text: d.paired ? 'ok · paired' : 'ok · waiting' };
+      noteServerBuild(d.build);
+      netOk();
       if (d.token && d.token !== pairLink) linkStore(d.token);
       if (d.code && d.code !== pairCode) {
         pairCode = d.code;
         pairCodeStore(pairCode);
-        if (current === 'phone') $('#pair-code').textContent = pairCode;
       }
+      pairPairedSet(d.paired === true);
       pairState = (d.paired ? 'paired' : 'waiting') + ' · ' + pairCode;
       renderHome();
-      pairPolls += 1;
-      if (pairPolls % 8 === 0) {
-        fetch('/api/pair', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: pairKey(), touch: true }),
-        }).catch(() => {});
-      }
-      if (current === 'phone') {
-        $('#pair-help').textContent = d.paired
-          ? 'Phone connected. Send a video from the iPhone app. It starts here on any screen.'
-          : 'Type this code in the GlassTube iPhone app.';
-      }
+      if (d.paired === true) pairTouchMaybe();
+      if (current === 'phone') renderPhone();
       const dest = d.dest;
       const playable = dest && (dest.id || (dest.videos && dest.videos[0]));
       const special = dest && (dest.kind === 'channels' || dest.kind === 'channel' ||
         dest.kind === 'session');
       if (dest && (playable || special) && d.destSeq !== pairLastSeq) {
         pairLastSeq = d.destSeq;
-        fetch('/api/pair', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: pairKey(), ack: d.destSeq }),
-        }).catch(() => {});
-        // A push older than a few minutes is a leftover from before this page
-        // loaded. Ack it but never auto-play it, so a forgotten tab stays silent.
-        const stale = playable && !special && dest.ts &&
-          (Date.now() - Number(dest.ts) > PUSH_FRESH_MS);
-        hudNote('push', { seq: d.destSeq, stale: !!stale,
-          ageS: dest.ts ? Math.round((Date.now() - Number(dest.ts)) / 1000) : null,
-          hasU: !!(dest.u || (dest.videos && dest.videos[0] && dest.videos[0].u)) });
-        if (!stale) applyPush(dest);
+        // WP6: track this push; handlePush sends 'got' (or 'missed' for a
+        // stale one), which replaces the plain ack and consumes the push.
+        deliveryTrack(d.destSeq);
+        // Stale, hidden and fresh pushes each go their own way: handlePush.
+        handlePush(dest, d.destSeq, !!special);
       }
     })
     .catch(e => {
-      pairState = netText(e).slice(0, 48);
-      setOffline(true);
+      // A bug while handling a good answer is not the network going away.
+      if (answered) { report('JS error: poll · ' + String((e && e.message) || e).slice(0, 120)); return; }
+      if (key !== pairKey()) return;
+      const timedOut = e && e.name === 'AbortError';
+      pairState = (timedOut ? 'no answer in ' + (POLL_TIMEOUT_MS / 1000) + 's' : netText(e)).slice(0, 48);
+      lastPoll = { at: Date.now(), ok: false, text: pairState };
+      netFail();
+    })
+    .then(function () {
+      clearTimeout(timeout);
+      if (pollCtrl === ctrl) pollCtrl = null;
+      pollBusy = false;
+      if (!pairKey()) return;
+      if (maybeUpdate()) return;
+      schedulePoll(pollAgain ? POLL_NOW_MS : nextPollDelay());
+      pollAgain = false;
     });
+}
+
+/* Self-update (WP1). The glasses keep this page alive for days, so a deploy
+   only lands if the page notices it is out of date. Every /api/pair answer
+   carries the deployed build (scripts/stamp.mjs); when it differs from ours,
+   reload at the next safe moment: idle on Home, or the moment the wearer
+   comes back to the app. Never in the player, never with search text typed,
+   never right after a push, and at most once per build (URL rv marker plus
+   localStorage reloadedFor), so a bad deploy cannot become a reload loop. */
+function urlRv() {
+  try { return new URL(location.href).searchParams.get('rv') || ''; }
+  catch (e) { return ''; }
+}
+
+function reloadedRecently(build) {
+  try {
+    const r = JSON.parse(localStorage.getItem(RELOADED_FOR_KEY) || 'null');
+    return !!(r && r.build === build && Date.now() - Number(r.at || 0) < UPDATE_RETRY_MS);
+  } catch (e) { return false; }
+}
+
+function updateAllowed() {
+  return !!updatePending && urlRv() !== updatePending && !reloadedRecently(updatePending);
+}
+
+function noteServerBuild(build) {
+  if (!build) return;
+  serverBuild = String(build);
+  if (serverBuild === String(window.GLASSTUBE_BUILD || '')) { updatePending = ''; return; }
+  if (updatePending === serverBuild) return;
+  updatePending = serverBuild;
+  // Already reloaded for this build and still behind: the reload did not take.
+  hudNote(updateAllowed() ? 'update-pending' : 'update-stuck',
+    { from: window.GLASSTUBE_BUILD || '', to: serverBuild });
+}
+
+function searchTextTyped() {
+  if (typeof typed === 'string' && typed.trim()) return true;
+  const field = document.querySelector('#screen-search input');
+  return !!(field && String(field.value || '').trim());
+}
+
+function pushIsFresh() {
+  if (lastPushAt && Date.now() - lastPushAt < UPDATE_PUSH_QUIET_MS) return true;
+  // A push held while hidden (WP4) plays before any reload.
+  return !!pendingPush;
+}
+
+/* Idle path: after each poll and every UPDATE_CHECK_MS. */
+function maybeUpdate() {
+  if (!updateAllowed() || document.hidden || current !== 'home' || navDepth() > 0) return false;
+  if (Date.now() - lastKeyAt < UPDATE_IDLE_MS || pushIsFresh()) return false;
+  reloadForUpdate(updatePending);
+  return true;
+}
+
+/* Resume path: the wearer reopened the app. Reload before any input, unless
+   a video is up or they were typing a search. */
+function resumeUpdate() {
+  if (!updateAllowed() || document.hidden) return false;
+  if (current === 'player' || searchTextTyped() || pushIsFresh()) return false;
+  reloadForUpdate(updatePending);
+  return true;
+}
+
+/* Reloads only from the root of the nav stack (WP3). Deeper than Home, it
+   first walks history back to depth 0 (navRoot), then reloads on the root
+   popstate, so the reloaded page does not start with stale history entries
+   that Back would walk into. */
+function reloadForUpdate(build) {
+  if (navDepth() > 0 || current !== 'home') {
+    navRoot(function () { reloadForUpdate(build); });
+    return;
+  }
+  try { progressSave(); } catch (e) { /* best effort */ }
+  try { sessionStorage.setItem(UPDATED_FROM_KEY, String(window.GLASSTUBE_BUILD || '?')); }
+  catch (e) { /* optional */ }
+  try { localStorage.setItem(RELOADED_FOR_KEY, JSON.stringify({ build: build, at: Date.now() })); }
+  catch (e) { /* optional */ }
+  stopPairPoll();
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('rv', build);
+    location.replace(u.toString());
+  } catch (e) {
+    // reloadedFor is already set, so this cannot loop: keep polling.
+    schedulePoll();
+  }
+}
+
+/* First thing after an update reload: say so, once, on the lens and in the
+   server log. A reload that landed on the same build gets no toast. */
+function noteUpdated() {
+  let from = '';
+  try {
+    from = sessionStorage.getItem(UPDATED_FROM_KEY) || '';
+    sessionStorage.removeItem(UPDATED_FROM_KEY);
+  } catch (e) { return; }
+  if (!from) return;
+  const to = String(window.GLASSTUBE_BUILD || '');
+  updatedFrom = from;
+  hudNote('updated', { from: from, to: to });
+  if (from === to) return;
+  const text = 'Updated · v' + to;
+  showToast(text, 'ok', 2500);
 }
 
 /* Diagnostics the wearer can actually read back to someone. Every line is a
@@ -1589,12 +4158,23 @@ let selfTest = null;
 function debugLines() {
   const errs = window.glasstubeErrors || [];
   const out = [];
-  out.push(['App', 'v' + (window.GLASSTUBE_BUILD || '?')]);
+  out.push(['Build', 'v' + (window.GLASSTUBE_BUILD || '?')]);
+  out.push(['Server build', serverBuild ? 'v' + serverBuild : 'not seen yet',
+    serverBuild ? serverBuild === window.GLASSTUBE_BUILD : undefined]);
+  out.push(['Update', updateLine()]);
+  out.push(['Old version?', 'Middle-finger tap on Home, then Restart.']);
+  out.push(['Last poll', lastPoll.at
+    ? Math.round((Date.now() - lastPoll.at) / 1000) + 's ago · ' + lastPoll.text
+    : lastPoll.text, lastPoll.at ? lastPoll.ok : undefined]);
+  out.push(['Poll every', (nextPollDelay() / 1000) + 's' + (pollFails ? ' · retrying' : '')]);
+  out.push(['Instance', instanceId + ' · ' + pollWho()]);
   out.push(['Origin', String(window.location.origin || '?')]);
   out.push(['Viewport', window.innerWidth + 'x' + window.innerHeight]);
   out.push(['Online', navigator.onLine ? 'yes' : 'no', !!navigator.onLine]);
   out.push(['Phone pairing', pairState, pairState.indexOf('paired') === 0 ? true : undefined]);
   out.push(['Pair link', pairLink ? 'durable · survives restarts' : 'code only', !!pairLink]);
+  if (pairUrlIgnored()) out.push(['Launcher link', 'still has the old code', false]);
+  out.push(['Last from iPhone', lastPushInfo ? lastPushText().replace('Last from iPhone: ', '') : 'nothing yet']);
   out.push(['iPhone app', phoneApp || 'has not pushed yet',
     phoneApp ? !phoneOutOfDate() : undefined]);
   out.push(['Google session', ytSession ? 'on glasses' : 'none', !!ytSession]);
@@ -1614,20 +4194,36 @@ function debugLines() {
   out.push(['Recents', String(recentsLoad().length)]);
   out.push(['Saved playlists', String(playlistsLoad().length)]);
   out.push(['Resume marks', String(Object.keys(marksLoad()).length)]);
+  out.push(['Input filter', 'dup ' + inputStats.dup + ' · enter-lock ' + inputStats.enterLock +
+    ' · repeat ' + inputStats.repeat + ' · unknown ' + inputStats.unknown]);
   out.push(['JS errors', errs.length ? errs[errs.length - 1] : 'none', !errs.length]);
   out.push(['Playback fails', playFails.length ? playFails[0] : 'none', !playFails.length]);
   if (playFails.length > 1) out.push(['Earlier fail', playFails[1], false]);
   return out;
 }
 
+function updateLine() {
+  if (updatePending) {
+    return updateAllowed() ? 'v' + updatePending + ' waiting for idle home'
+      : 'v' + updatePending + ' did not load · use Restart';
+  }
+  if (updatedFrom) return 'reloaded from v' + updatedFrom;
+  return 'none';
+}
+
 function renderDebug() {
   const rows = $('#debug-rows');
+  // A self-test answer re-renders the rows: keep the page the band is on.
+  const keep = current === 'debug' ? rows.scrollTop : 0;
   rows.innerHTML = '';
   debugLines().forEach(function (row) {
     const d = document.createElement('div');
     if (row[2] === true) d.className = 'debug-ok';
     if (row[2] === false) d.className = 'debug-bad';
-    d.textContent = row[0] + ': ' + row[1];
+    // Never colour alone: a glyph says it too.
+    const mark = row[2] === true ? '✓ ' : (row[2] === false ? '✗ ' : '');
+    const ask = /\?$/.test(row[0]);
+    d.textContent = mark + row[0] + (ask ? ' ' : ': ') + row[1];
     rows.appendChild(d);
   });
   const errs = window.glasstubeErrors || [];
@@ -1641,6 +4237,8 @@ function renderDebug() {
   ]).join('\n');
   const logEl = $('#debug-log');
   if (logEl) logEl.value = dump;
+  if (keep) rows.scrollTo({ top: keep, behavior: 'instant' });
+  if (current === 'debug') syncFades();
 }
 
 /* Ask the server, out loud, whether it can get this exact video - the single
@@ -1683,87 +4281,390 @@ function runSelfTest() {
     });
 }
 
+/* Swipe-proof: no single swipe skips or quits a video (WP7).
+   Pinch play/pause · Right +10s · Up -10s · Down menu · Left twice to leave. */
 function handlePlayerKey(e) {
   const key = e.key;
-  if (isBackKey(key) || key === DPAD.LEFT) {
-    e.preventDefault();
-    goBack();
+  let k = '';
+  if (isBackKey(key)) k = 'back';
+  else if (key === DPAD.LEFT) k = 'left';
+  else if (key === DPAD.RIGHT) k = 'right';
+  else if (key === DPAD.UP || key === 'Up' || e.code === 'ArrowUp') k = 'up';
+  else if (key === DPAD.DOWN || key === 'Down' || e.code === 'ArrowDown') k = 'down';
+  else if (key === DPAD.SELECT || key === ' ') k = 'pinch';
+  if (!k) return;
+  e.preventDefault();
+  if (k !== 'left') disarmLeave();
+  if (menuIsOpen()) {
+    menuKey(k);
     return;
   }
-  if (key === DPAD.SELECT || key === ' ') {
-    e.preventDefault();
-    needGesture = false;
-    if (typeof Player !== 'undefined') Player.toggle();
-    setPlayGate(false);
-    updateChrome();
+  if (k === 'back') {
+    leavePlayer();
     return;
   }
-  if (key === DPAD.RIGHT) {
-    e.preventDefault();
-    if (typeof Player !== 'undefined') Player.seek(10);
-    updateChrome();
+  chromeShow();
+  if (upNextIdx >= 0) {
+    // Up next: pinch plays now, Left cancels (and arms the guarded exit).
+    if (k === 'pinch') playUpNext();
+    else if (k === 'left') {
+      cancelUpNext();
+      updateChrome();
+      guardedLeave();
+    }
     return;
   }
-  if (key === DPAD.UP || key === 'Up' || e.code === 'ArrowUp') {
-    e.preventDefault();
-    if (queue.length > 1) playPrev();
-    else if (typeof Player !== 'undefined') Player.seek(-10);
-    updateChrome();
+  if (playerFault()) {
+    // Final error: every action on screen is one gesture.
+    if (k === 'pinch') openRelay();
+    else if (k === 'down') {
+      // Same rule that shows 'Swipe down: next video': forward only, never a
+      // video that already failed, and a pushed list never wraps.
+      const n = nextIndex(false);
+      if (n >= 0) openPlayer(n, true, resumeAt(queue[n] && queue[n].id));
+    }
+    else if (k === 'left') leavePlayer();
     return;
   }
-  if (key === DPAD.DOWN || key === 'Down' || e.code === 'ArrowDown') {
-    e.preventDefault();
-    playNext();
-  }
+  if (k === 'left') { guardedLeave(); return; }
+  if (k === 'down') { openPlayerMenu(); return; }
+  if (k === 'pinch') { playerPinch(); return; }
+  seekBy(k === 'right' ? 1 : -1);
 }
 
 function handleSearchKey(e) {
   const key = e.key;
+  const input = kbInput();
+  if (input && document.activeElement === input) {
+    // The field holds real focus so a pinch can open the composer. Only the
+    // band's keys are taken, with preventDefault so arrows never move the
+    // text caret. Everything else (letters, Backspace, the IME's
+    // 'Unidentified' keys) is left alone and arrives as typing.
+    if (key === DPAD.UP || key === DPAD.RIGHT) { e.preventDefault(); return; }
+    if (key === DPAD.DOWN) { e.preventDefault(); moveKey(1, 0); return; }
+    if (key === DPAD.LEFT) {
+      e.preventDefault();
+      if (searchLeftIsBack()) leaveSearch();
+      return;
+    }
+    if (key === DPAD.SELECT) {
+      if (typed.trim()) { e.preventDefault(); runSearch(); }
+      // Empty field: the pinch goes through, which is what opens the composer.
+      return;
+    }
+    if (key === 'Escape' || key === 'BrowserBack' || key === 'GoBack') {
+      e.preventDefault();
+      leaveSearch();
+    }
+    return;
+  }
   if (isBackKey(key)) {
     e.preventDefault();
-    show('home');
+    leaveSearch();
     return;
   }
   if (key === DPAD.UP) { e.preventDefault(); moveKey(-1, 0); return; }
   if (key === DPAD.DOWN) { e.preventDefault(); moveKey(1, 0); return; }
-  if (key === DPAD.LEFT) { e.preventDefault(); moveKey(0, -1); return; }
+  if (key === DPAD.LEFT) {
+    e.preventDefault();
+    if (searchLeftIsBack()) leaveSearch();
+    else moveKey(0, -1);
+    return;
+  }
   if (key === DPAD.RIGHT) { e.preventDefault(); moveKey(0, 1); return; }
   if (key === DPAD.SELECT || key === ' ') { e.preventDefault(); pressKey(); return; }
-  if (key === 'Backspace') { e.preventDefault(); typed = typed.slice(0, -1); renderSearch(); return; }
   // A real keyboard is attached when rehearsing on a computer. Let it type.
-  if (key && key.length === 1 && typed.length < 60) {
+  if (key && key.length === 1 && typed.length < KB_MAX) {
     e.preventDefault();
-    typed += key.toUpperCase();
-    renderSearch();
+    typed = cleanQuery(typed + key);
+    searchTyped();
   }
 }
 
+/* ---- Input arbiter -----------------------------------------------------
+
+   Every key the Neural Band (or a keyboard, or the harness) sends goes
+   through here once, in the capture phase, before anything else sees it.
+   resolveKey turns it into one gesture name without guessing: e.key, then
+   e.code, then a single printable e.key as { char } (Search types with it),
+   then the DOM keyCodes 37-40/13 and the Android keycodes 19-22, 23 and 66.
+   Anything else is ignored. Then two filters keep one physical gesture from
+   doing two things: the same gesture inside DUP_MS is one
+   gesture, and Enter inside ENTER_LOCK_MS of a swipe is a side effect of
+   the swipe, not a pinch. Held Enter (repeat) never fires again. Do not
+   filter on isTrusted: the harness and selftest dispatch synthetic keys. */
+const INPUT = {
+  DUP_MS: 120,
+  ENTER_LOCK_MS: 320,
+};
+const INPUT_KEYS = {
+  ArrowUp: 'up', Up: 'up', ArrowDown: 'down', Down: 'down',
+  ArrowLeft: 'left', Left: 'left', ArrowRight: 'right', Right: 'right',
+  Enter: 'enter', NumpadEnter: 'enter', Select: 'enter',
+  Escape: 'back', Esc: 'back', Backspace: 'back', BrowserBack: 'back', GoBack: 'back',
+};
+const INPUT_CODES = {
+  37: 'left', 38: 'up', 39: 'right', 40: 'down', 13: 'enter',
+  19: 'up', 20: 'down', 21: 'left', 22: 'right', 23: 'enter', 66: 'enter',
+};
+/* What each gesture looks like to the per-screen handlers, which still read
+   e.key (the player mapping belongs to WP7 and is not changed here). */
+const INPUT_AS_KEY = {
+  up: DPAD.UP, down: DPAD.DOWN, left: DPAD.LEFT, right: DPAD.RIGHT,
+  enter: DPAD.SELECT, back: 'Escape',
+};
+const inputStats = { dup: 0, enterLock: 0, repeat: 0, unknown: 0 };
+let inputLast = '';
+let inputLastAt = 0;
+let inputArrowAt = 0;
+
+function resolveKey(e) {
+  if (!e) return null;
+  const k = e.key;
+  if (k && INPUT_KEYS[k]) return { name: INPUT_KEYS[k] };
+  if (e.code && INPUT_KEYS[e.code]) return { name: INPUT_KEYS[e.code] };
+  // A printable e.key wins over the keyCode tables: DOM keyCode 66 is 'b',
+  // which the Android table would otherwise read as Enter.
+  if (k && k.length === 1) {
+    return (e.ctrlKey || e.metaKey || e.altKey) ? null : { char: k };
+  }
+  const kc = Number(e.keyCode || e.which || 0);
+  if (INPUT_CODES[kc]) return { name: INPUT_CODES[kc] };
+  return null;
+}
+
+/* The gesture the screen sees: a small event-shaped object, so handlers that
+   read e.key work the same for Android keycodes and for real arrow keys. */
+function inputEvent(e, r) {
+  return {
+    key: r.char || INPUT_AS_KEY[r.name],
+    code: e.code || '',
+    repeat: !!e.repeat,
+    gesture: r.name || 'char',
+    preventDefault: function () { e.preventDefault(); },
+  };
+}
+
 document.addEventListener('keydown', function (e) {
+  // Read before noting: the key that completes the test ends it, and it must
+  // be swallowed like the other 19.
+  const testing = !!inputTest && current === 'debug';
+  inputTestNote('keydown', e);
+  // Any key is activity (WP1): it keeps the fast poll cadence and holds off
+  // an update reload, even a key the arbiter then ignores.
+  lastKeyAt = Date.now();
+  lastActiveAt = lastKeyAt;
+  pollSoonerIfIdle();
+  const r = resolveKey(e);
+  if (!r && !pendingPush) { inputStats.unknown++; return; }
+  // WP8: while Search's native field holds focus, printable keys and
+  // Backspace are typing and go to the field untouched, and a pinch on an
+  // empty field passes through so it can open the system composer. Arrows
+  // and Escape are still taken (preventDefault keeps the caret still).
+  const field = current === 'search' ? kbInput() : null;
+  const inField = !!field && document.activeElement === field;
+  const fieldTyping = inField && !!r && (!!r.char || e.key === 'Backspace');
+  if (!fieldTyping && !(inField && r && r.name === 'enter' && !typed.trim())) e.preventDefault();
+  const now = Date.now();
+  // Any resolved gesture is a user activation: let WP5's player unlock the
+  // video element on it synchronously, inside the gesture, while it is still
+  // locked.
+  if (!Player.unlocked()) {
+    try { Player.unlock(); } catch (x) { /* unlock is best effort */ }
+  }
+  // WP4: a push held while hidden plays on the first key when the WebView
+  // never reports visible. That key is consumed, so it is not also read as
+  // a command on the screen underneath.
+  if (pendingPush) { e.preventDefault(); releasePendingPush(); return; }
+  if (testing) return;
+  if (fieldTyping) return;
+  const name = r.name || ('char:' + r.char);
+  // A filtered Enter is never a pinch, so it must not reach the field either.
+  if (r.name === 'enter' && e.repeat) { e.preventDefault(); inputStats.repeat++; return; }
+  if (!r.char && name === inputLast && now - inputLastAt < INPUT.DUP_MS) {
+    e.preventDefault();
+    inputStats.dup++;
+    inputLastAt = now;
+    return;
+  }
+  if (r.name === 'enter' && now - inputArrowAt < INPUT.ENTER_LOCK_MS) {
+    e.preventDefault();
+    inputStats.enterLock++;
+    return;
+  }
+  inputLast = name;
+  inputLastAt = now;
+  if (r.name === 'up' || r.name === 'down' || r.name === 'left' || r.name === 'right') {
+    inputArrowAt = now;
+  }
+  inputDispatch(inputEvent(e, r));
+}, true);
+
+document.addEventListener('keyup', function (e) {
+  inputTestNote('keyup', e);
+}, true);
+
+/* One place decides who gets the gesture: the player (its own mapping, WP7
+   adds the player menu inside it), Search (typing and the letter grid), or
+   the list screens. */
+function inputDispatch(ev) {
   if (current === 'player') {
-    handlePlayerKey(e);
+    handlePlayerKey(ev);
     return;
   }
   if (current === 'search') {
-    handleSearchKey(e);
+    handleSearchKey(ev);
     return;
   }
-  const key = e.key;
-  if (isBackKey(key)) {
-    e.preventDefault();
+  handleDefaultKey(ev);
+}
+
+function handleDefaultKey(ev) {
+  const g = ev.gesture;
+  if (g === 'back' || g === 'left') {
+    // Left on Home is a no-op apart from a short pulse on the title.
     goBack();
     return;
   }
-  if (key === DPAD.LEFT) {
-    e.preventDefault();
-    if (current === 'home') moveFocus('up');
-    else goBack();
+  if ((g === 'up' || g === 'down') && current === 'debug' && pageDebug(g)) return;
+  if (g === 'up') { moveFocus('up'); return; }
+  if (g === 'down') { moveFocus('down'); return; }
+  if (g === 'right') {
+    if (current === 'list') { moveFocusBy(4); return; }
+    if (current === 'settings' && settingsCycles(document.activeElement)) {
+      activateFocused();
+      return;
+    }
+    moveFocus('down');
     return;
   }
-  if (key === DPAD.UP) { e.preventDefault(); moveFocus('up'); return; }
-  if (key === DPAD.DOWN) { e.preventDefault(); moveFocus('down'); return; }
-  if (key === DPAD.RIGHT) { e.preventDefault(); moveFocus('down'); return; }
-  if (key === DPAD.SELECT) { e.preventDefault(); activateFocused(); }
-}, true);
+  if (g === 'enter') activateFocused();
+}
+
+/* Diagnostics: the status rows are not focusable, so the band pages them.
+   Down pages #debug-rows until its last line shows, then walks the buttons.
+   Up walks the buttons back to the first, then pages the rows up. Returns
+   true when it scrolled, so the key does not also move focus. */
+function pageDebug(dir) {
+  const body = $('#debug-rows');
+  if (!body || body.offsetParent === null) return false;
+  const max = Math.max(0, body.scrollHeight - body.clientHeight);
+  if (!max) return false;
+  const top = body.scrollTop;
+  if (dir === 'up') {
+    const f = focusables();
+    if (f.indexOf(document.activeElement) > 0 || top <= 1) return false;
+  } else if (top >= max - 1) {
+    return false;
+  }
+  const step = Math.max(28, body.clientHeight - 56);
+  const next = Math.max(0, Math.min(max, Math.round(top + (dir === 'up' ? -step : step))));
+  body.scrollTo({ top: next, behavior: 'instant' });
+  updateFades(body, next);
+  return true;
+}
+
+/* Settings rows with a value (the <small> on the right) cycle on Right as
+   well as on a pinch. Diagnostics, the last row, only opens on a pinch. */
+function settingsCycles(el) {
+  return !!(el && el.closest && el.closest('#screen-settings') && el.querySelector('small'));
+}
+
+/* ---- Diagnostics: Input test ---------------------------------------------
+
+   Records the next INPUT_TEST_MAX raw key events exactly as the band sends
+   them (key, code, keyCode, repeat, gap since the previous event, how long
+   the key was held) so the arbiter's thresholds can be checked against the
+   real hardware. While it runs, keys only record; it stops by itself after
+   INPUT_TEST_IDLE_MS without a key, then reports to the server log. */
+const INPUT_TEST_MAX = 20;
+const INPUT_TEST_IDLE_MS = 8000;
+let inputTest = null;
+
+function inputTestStart() {
+  if (inputTest) return;
+  inputTest = { rows: [], prevAt: 0, down: {}, idle: 0 };
+  inputTestArm();
+  renderInputTest();
+}
+
+function inputTestArm() {
+  if (!inputTest) return;
+  clearTimeout(inputTest.idle);
+  inputTest.idle = setTimeout(inputTestEnd, INPUT_TEST_IDLE_MS);
+}
+
+function inputTestNote(type, e) {
+  if (!inputTest || inputTest.done) return;
+  const now = Date.now();
+  if (type === 'keyup') {
+    const row = inputTest.down[(e && (e.key || e.code || e.keyCode)) || '?'];
+    if (row && row.held == null) {
+      row.held = now - row.at;
+      renderInputTest();
+    }
+    return;
+  }
+  const row = {
+    type: type,
+    key: e ? String(e.key || '') : '',
+    code: e ? String(e.code || '') : '',
+    keyCode: e ? Number(e.keyCode || 0) : 0,
+    repeat: !!(e && e.repeat),
+    gap: inputTest.prevAt ? now - inputTest.prevAt : null,
+    held: null,
+    at: now,
+  };
+  inputTest.prevAt = now;
+  inputTest.rows.push(row);
+  if (e) inputTest.down[e.key || e.code || e.keyCode || '?'] = row;
+  inputTestArm();
+  renderInputTest();
+  if (inputTest.rows.length >= INPUT_TEST_MAX) inputTestEnd();
+}
+
+function inputTestEnd() {
+  if (!inputTest || inputTest.done) return;
+  clearTimeout(inputTest.idle);
+  inputTest.done = true;
+  renderInputTest();
+  hudNote('input-test', {
+    events: inputTest.rows.map(function (r) {
+      return { t: r.type, key: r.key, code: r.code, kc: r.keyCode, rep: r.repeat, gap: r.gap, held: r.held };
+    }),
+    stats: Object.assign({}, inputStats),
+  });
+  // Keep the result on screen; the next key works normally again.
+  const shown = inputTest;
+  inputTest = null;
+  renderInputTest(shown);
+}
+
+function renderInputTest(state) {
+  const box = $('#input-log');
+  if (!box) return;
+  const t = state || inputTest;
+  if (!t) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  const head = t.done
+    ? 'Input test · ' + t.rows.length + ' events · sent'
+    : 'Input test · ' + t.rows.length + '/' + INPUT_TEST_MAX + ' · swipe or pinch';
+  box.innerHTML = '';
+  const h = document.createElement('div');
+  h.className = 'input-log-head';
+  h.textContent = head;
+  box.appendChild(h);
+  t.rows.slice(-8).forEach(function (r) {
+    const d = document.createElement('div');
+    d.className = 'input-log-row';
+    d.textContent = (r.type === 'keydown' ? '' : r.type + ' ') +
+      (r.key || r.code || '?') + ' · ' + r.keyCode +
+      (r.repeat ? ' · rep' : '') +
+      ' · ' + (r.gap == null ? 'first' : '+' + r.gap + 'ms') +
+      ' · held ' + (r.held == null ? '-' : r.held + 'ms');
+    box.appendChild(d);
+  });
+}
 
 document.querySelectorAll('#screen-home [data-menu]').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -1773,54 +4674,146 @@ document.querySelectorAll('#screen-home [data-menu]').forEach(btn => {
     if (menu === 'playlists') openPlaylists();
     if (menu === 'phone') openPhone();
     if (menu === 'continue') openContinue();
+    if (menu === 'missed') openMissed();
     if (menu === 'search') openSearch();
     if (menu === 'library') openLibrary();
-    if (menu === 'queue') openQueue();
-    if (menu === 'settings') { renderSettings(); show('settings'); }
-    if (menu === 'debug') { renderDebug(); show('debug'); }
+    if (menu === 'settings') openSettings();
   });
 });
+
+function openSettings() {
+  navTo({ name: 'settings', render: function () { renderSettings(); show('settings'); } });
+}
+
+function openDebug() {
+  navTo({ name: 'debug', render: function () {
+    renderDebug();
+    show('debug');
+    // Start at the top (Build first). A hidden scroller keeps its old offset,
+    // and a Back restore puts the saved one back after this (navRestore).
+    const rows = $('#debug-rows');
+    if (rows) { rows.scrollTop = 0; syncFades(); }
+  } });
+}
 
 window.addEventListener('offline', () => setOffline(true));
 window.addEventListener('online', () => {
   setOffline(false);
   if (!pairCode) ensureListening();
+  pollNow();
 });
 
-$('#btn-phone-back').addEventListener('click', () => show('home'));
-// "New code" is how you hand the glasses to a different phone, so it has to
-// drop the durable link too, not just the six characters on screen.
+/* Page lifecycle (WP1). The glasses keep this page for days and hide and show
+   it as the wearer comes and goes, so each return is a moment to catch up:
+   poll now, and if a new build is waiting, load it before any input. */
+function onResume() {
+  lastActiveAt = Date.now();
+  // WP4: a push held while hidden plays now that the wearer can see it. It
+  // counts as a fresh push, so resumeUpdate() will not reload over it.
+  releasePendingPush();
+  if (resumeUpdate()) return;
+  pollNow();
+}
+document.addEventListener('visibilitychange', function () {
+  if (!document.hidden) { onResume(); return; }
+  // Hidden: save progress now (it is otherwise saved at most every 10s while
+  // playing) and drop to the hidden poll cadence.
+  if (current === 'player') progressSave();
+  if (!pollBusy && pairKey()) schedulePoll(nextPollDelay());
+});
+let firstPageshow = true;
+window.addEventListener('pageshow', function (e) {
+  // The first pageshow is this page loading, not the wearer coming back.
+  if (firstPageshow && !e.persisted) { firstPageshow = false; return; }
+  firstPageshow = false;
+  onResume();
+});
+window.addEventListener('focus', function () { pollNow(); });
+// Key activity (lastKeyAt, lastActiveAt, pollSoonerIfIdle) is recorded by
+// the WP3 input arbiter, the one keydown path.
+
+// "Link a different phone" is how you hand the glasses to a different phone,
+// so it has to drop the durable link too, not just the six characters on
+// screen. It takes two pinches: one stray pinch must not unpair the iPhone.
+function disarmUnlink() {
+  if (unlinkArmed) clearTimeout(unlinkArmed);
+  unlinkArmed = 0;
+  const btn = $('#btn-pair-new');
+  if (btn) btn.textContent = PAIR_NEW_LABEL;
+}
 $('#btn-pair-new').addEventListener('click', () => {
+  if (!unlinkArmed) {
+    $('#btn-pair-new').textContent = 'Pinch again to unlink your iPhone';
+    unlinkArmed = setTimeout(disarmUnlink, UNLINK_ARM_MS);
+    return;
+  }
+  disarmUnlink();
+  hudNote('unlink');
   stopPairPoll();
+  // WP6: only the full link token these glasses held is ever superseded.
+  if (/^[a-f0-9]{64}$/i.test(linkStored())) pairReplaces = linkStored();
+  pairIgnoreUrl();
+  pairPairedSet(false);
   pairCode = '';
   pairLastSeq = -1;
   pairCodeStore('');
   linkStore('');
   newPairCode();
 });
-$('#btn-debug-back').addEventListener('click', () => show('home'));
+$('#btn-debug').addEventListener('click', openDebug);
+$('#btn-input-test').addEventListener('click', inputTestStart);
 const relayBtn = $('#btn-relay');
 if (relayBtn) relayBtn.addEventListener('click', openRelay);
-const searchBack = $('#btn-search-back');
-if (searchBack) searchBack.addEventListener('click', () => show('home'));
-$('#btn-settings-back').addEventListener('click', () => show('home'));
+const kbField = kbInput();
+if (kbField) {
+  kbField.addEventListener('input', searchFromInput);
+  kbField.addEventListener('compositionend', searchFromInput);
+  // The composer commits with 'change' (or Enter, handled in handleSearchKey).
+  kbField.addEventListener('change', function (e) {
+    if (kbBlurring || current !== 'search') return;
+    searchFromInput(e);
+    if (typed.trim()) runSearch();
+  });
+  // A tap on the field (or the system focusing it) moves the cursor there.
+  kbField.addEventListener('focus', function () {
+    if (current !== 'search' || keyRow === KB_INPUT_ROW) return;
+    keyRow = KB_INPUT_ROW;
+    renderSearch();
+  });
+}
 $('#btn-retest').addEventListener('click', runSelfTest);
 $('#btn-copy-debug').addEventListener('click', function () {
   const t = ($('#debug-log') && $('#debug-log').value) || 'No errors yet.';
-  function ok() {
+  function say(msg) {
     const hint = $('#debug-copy-msg');
-    if (hint) hint.textContent = 'Copied. Paste it in chat.';
+    if (hint) hint.textContent = msg;
+  }
+  function ok() { say('Copied. Paste it in chat.'); }
+  // Select + execCommand, for a WebView with no clipboard API or one that
+  // refuses writeText. Either way the wearer always gets a line back.
+  function fallback() {
+    const el = $('#debug-log');
+    // The textarea sits off screen: focus goes back where it was (the button)
+    // so the ring stays and the next pinch or arrow still works.
+    const back = document.activeElement;
+    let done = false;
+    if (el) {
+      el.focus();
+      el.select();
+      try { done = !!document.execCommand('copy'); } catch (e) { done = false; }
+      el.setSelectionRange(0, 0);
+      el.blur();
+      const btn = back && back !== el && back !== document.body ? back : $('#btn-copy-debug');
+      if (btn && btn.focus) btn.focus();
+    }
+    if (done) ok();
+    else say('Could not copy.');
   }
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(t).then(ok).catch(function () {});
+    navigator.clipboard.writeText(t).then(ok, fallback);
     return;
   }
-  const el = $('#debug-log');
-  if (el) {
-    el.focus();
-    el.select();
-    try { document.execCommand('copy'); ok(); } catch (e) {}
-  }
+  fallback();
 });
 $('#btn-sound').addEventListener('click', () => {
   if (!sound) return;
@@ -1871,27 +4864,63 @@ function ensureListening() {
   newPairCode();
 }
 
-if (typeof Player !== 'undefined' && Player.preload) Player.preload();
+// Seed the nav stack's root in history, so the first pushState has a depth-0
+// entry to come back to (system Back on firmware v125.1+, and ArrowLeft).
+// A load at depth > 0 (a reload from a deeper screen) sits on top of stale
+// entries that system Back would walk into on Home: walk history back to the
+// root first, the way navRoot does, and seed it on the root popstate.
+function seedHistoryRoot() {
+  const h = histDepth();
+  if (h > 0) {
+    navAfterRoot = function () {
+      try { history.replaceState({ gt: 1, d: 0 }, ''); } catch (e) { /* no history API */ }
+    };
+    try {
+      history.go(-h);
+      setTimeout(function () { if (navDepth() === 0) navRunAfterRoot(); }, 800);
+      return;
+    } catch (e) { navAfterRoot = null; }
+  }
+  try { history.replaceState({ gt: 1, d: 0 }, ''); } catch (e) { /* no history API */ }
+}
+seedHistoryRoot();
+
+// Leaving the page saves progress now too (hiding it is handled above).
+window.addEventListener('pagehide', function () {
+  if (current === 'player') progressSave();
+});
 sessionStore(sessionLoad());
 renderSettings();
+pairBoot();
 renderHome();
-if (prefs && prefs.sleep()) armSleep();
+if (prefs && prefs.sleep()) armSleep(true);
 ensureListening();
+setInterval(function () { if (!pollBusy) maybeUpdate(); }, UPDATE_CHECK_MS);
+setInterval(pollWatchdog, WATCHDOG_MS);
+
+/* Launch stamp: the build shows on Home for a few seconds after the splash,
+   so a deploy that reached the glasses can be seen to have landed. */
+function showBuildChip() {
+  const chip = $('#build-chip');
+  if (!chip) return;
+  chip.textContent = 'v' + (window.GLASSTUBE_BUILD || '?');
+  chip.classList.remove('chip-out', 'hidden');
+  setTimeout(function () { chip.classList.add('chip-out'); }, BUILD_CHIP_MS);
+  // Once faded, drop its layout box so the link chip ends at the right inset.
+  setTimeout(function () { chip.classList.add('hidden'); }, BUILD_CHIP_MS + 450);
+}
 
 function hideSplash() {
   const splash = $('#splash');
   if (!splash || splash.classList.contains('splash-out')) return;
   splash.classList.add('splash-out');
-  setTimeout(function () { splash.classList.add('hidden'); }, 700);
+  setTimeout(function () { splash.classList.add('hidden'); }, 220);
   focusFirst();
   if (window.glasstubeFitStage) window.glasstubeFitStage();
 }
 
-const splashIcon = document.querySelector('.splash-icon');
-function holdThenHide() {
-  setTimeout(hideSplash, 900);
-}
-if (splashIcon && splashIcon.complete && splashIcon.naturalWidth) holdThenHide();
-else if (splashIcon) splashIcon.addEventListener('load', holdThenHide);
-else holdThenHide();
-setTimeout(hideSplash, 2600);
+setTimeout(function () {
+  hideSplash();
+  showBuildChip();
+  noteUpdated();
+}, 300);

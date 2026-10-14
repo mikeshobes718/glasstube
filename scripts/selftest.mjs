@@ -197,8 +197,12 @@ async function checkPushRoundTrip(pair, fileUrl) {
         videos: [{ id: SAMPLE, title: 'selftest', channel: 'selftest', u: fileUrl, r: relay }],
       }),
     });
-    if (!d.ok && d.error) { bad('push', d.error); return; }
-    ok('push accepted');
+    // WP6: with delivery live, a push to a pair no glasses poll is saved but
+    // answered honestly (ok:false, delivery.state 'away'). That is a pass; the
+    // round trip below still proves it was stored with its file.
+    const state = d.delivery && d.delivery.state;
+    if (!d.ok && d.error && state !== 'away') { bad('push', d.error); return; }
+    ok('push accepted', state === 'away' ? 'saved; delivery says no glasses checked in (expected here)' : (state || ''));
   } catch (e) { bad('push', e.message); return; }
 
   try {
@@ -283,6 +287,7 @@ async function runPlayback(browser, fileUrl) {
 
     const wired = await page.evaluate(() => ({
       menus: [...document.querySelectorAll('#screen-home [data-menu]')].map(e => e.dataset.menu),
+      debug: !!document.querySelector('#screen-settings #btn-debug'),
       player: typeof Player !== 'undefined',
       routes: typeof Player !== 'undefined' ? Player.routes() : [],
     }));
@@ -291,15 +296,20 @@ async function runPlayback(browser, fileUrl) {
     } else {
       bad('route chain', JSON.stringify(wired.routes));
     }
-    if (wired.menus.includes('search') && wired.menus.includes('debug')) ok('home menu wired');
+    // Diagnostics lives at the bottom of Settings now, not on Home.
+    if (wired.menus.includes('search') && wired.debug) ok('home menu wired');
     else bad('home menu', wired.menus.join(','));
 
     // Back has to be reachable with nothing but the D-pad, or the search grid
     // traps the wearer: the glasses keep their own back gesture.
     await page.evaluate(() => document.querySelector('[data-menu="search"]').click());
     await page.waitForTimeout(250);
-    for (let i = 0; i < 4; i++) { await page.keyboard.press('ArrowDown'); await page.waitForTimeout(50); }
+    // Action row is Search | Delete | Clear | Back: Down 4 lands on Search,
+    // Right 3 on Back. Spaced so the input arbiter does not merge presses.
+    for (let i = 0; i < 4; i++) { await page.keyboard.press('ArrowDown'); await page.waitForTimeout(200); }
+    for (let i = 0; i < 3; i++) { await page.keyboard.press('ArrowRight'); await page.waitForTimeout(200); }
     const onKey = await page.$eval('.kb-key.kb-on', e => e.textContent);
+    await page.waitForTimeout(400);
     await page.keyboard.press('Enter');
     await page.waitForTimeout(300);
     const screen = await page.evaluate(() =>

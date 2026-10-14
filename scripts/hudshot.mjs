@@ -27,6 +27,22 @@
 // real-world background: the Ray-Ban Display adds light, so black is
 // transparent and dim greys nearly vanish. Judge legibility on THAT image.
 //
+// Offline / fixtures: when production cannot be reached (or with --offline),
+// /api/search, /api/feed, /api/oembed, /api/suggest and /api/watch are answered
+// from scripts/fixtures instead, and i.ytimg.com thumbnails come from
+// scripts/fixtures/thumbs. Fixture data is for layout only, never for claims
+// about what production returns.
+//
+// --media "id=file.mp4,id2=403"   push a phone file for these ids. The HUD gets a
+//     googlevideo-shaped URL (so the 'file' route runs) that the harness serves
+//     from the local file (resolved against cwd, then $GLASSTUBE_MEDIA, default
+//     /tmp/glasstube-media; make them with scripts/mkmedia.sh), or answers 403.
+// --push2-after <ms>   re-push the same payload as seq 2 at that time.
+// --autoplay-policy <p>   Chromium autoplay policy (default no-user-gesture-required;
+//     the glasses WebView is closer to user-gesture-required).
+// POST /api/diag, /api/watch (reports) and POST /api/pair bodies other than a
+// plain mint are printed as [hud-report] / [pair-post] and never reach prod.
+//
 // Console errors from the page are printed at the end.
 import http from 'node:http';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
@@ -50,6 +66,33 @@ const ADDITIVE = flag('additive');
 const PAIRED = flag('paired') || !!opt('push', '');
 const PUSH_IDS = (opt('push', '') || '').split(',').filter(Boolean);
 const PUSH_AFTER = Number(opt('push-after', '4000'));
+const PUSH2_AFTER = Number(opt('push2-after', '0'));
+const AUTOPLAY = opt('autoplay-policy', 'no-user-gesture-required');
+const MEDIA_DIR = process.env.GLASSTUBE_MEDIA || '/tmp/glasstube-media';
+const MEDIA = {};
+for (const pair of String(opt('media', '') || '').split(',').filter(Boolean)) {
+  const [id, file] = pair.split('=');
+  if (!id || !file) continue;
+  if (file === '403' || /^\d{3}$/.test(file)) { MEDIA[id] = Number(file); continue; }
+  const base = file.split('/').pop();
+  const cands = [resolve(file), join(MEDIA_DIR, file), join(MEDIA_DIR, base),
+    join(MEDIA_DIR, base.replace(/\.mp4$/, '.webm'))];
+  MEDIA[id] = cands.find(f => existsSync(f)) || cands[0];
+}
+const FIX = join(resolve(new URL('.', import.meta.url).pathname), 'fixtures');
+function mediaUrl(id) {
+  const exp = Math.floor(Date.now() / 1000) + 6 * 3600;
+  return 'https://rr1---sn-hudshot.googlevideo.com/videoplayback?expire=' + exp +
+    '&ei=hudshot&ip=127.0.0.1&id=o-' + id + '&itag=18&source=youtube&requiressl=yes' +
+    '&mime=video%2Fmp4&dur=20.000&lmt=1&sparams=expire%2Cei%2Cip%2Cid%2Citag&sig=hudshot' + id;
+}
+async function readBuild() {
+  try {
+    const t = await readFile(join(ROOT, 'api', '_build.js'), 'utf8');
+    const m = t.match(/BUILD\s*=\s*['"]([^'"]+)['"]/);
+    return m ? m[1] : null;
+  } catch (e) { return null; }
+}
 const started = Date.now();
 let pushDest = null;
 async function buildPush() {
@@ -57,13 +100,18 @@ async function buildPush() {
   for (const id of PUSH_IDS) {
     let title = 'YouTube video', channel = '';
     try {
-      const j = await (await fetch(PROD + '/api/oembed?url=' + encodeURIComponent('https://youtu.be/' + id))).json();
+      const j = OFFLINE ? fixtureOembed(id)
+        : await (await fetch(PROD + '/api/oembed?url=' + encodeURIComponent('https://youtu.be/' + id))).json();
       title = j.title || title; channel = j.channel || '';
     } catch (e) {}
-    videos.push({ id, title, channel, thumb: 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg' });
+    const v = { id, title, channel, thumb: 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg' };
+    if (MEDIA[id] !== undefined) v.u = mediaUrl(id);
+    videos.push(v);
   }
-  return { id: videos[0].id, title: videos[0].title, channel: videos[0].channel, thumb: videos[0].thumb,
+  const d = { id: videos[0].id, title: videos[0].title, channel: videos[0].channel, thumb: videos[0].thumb,
     videos, playlist: 'From iPhone', app: '2.2 (35)', ts: Date.now() };
+  if (videos[0].u) d.u = videos[0].u;
+  return d;
 }
 const PROD = 'https://glasstube.vercel.app';
 const UA = 'Mozilla/5.0 (Linux; Android 14; Greatwhite Build/UKQ1.250303.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/151.0.7922.173 Safari/537.36';
@@ -72,23 +120,92 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
   '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.json': 'application/json', '.webmanifest': 'application/manifest+json',
   '.woff2': 'font/woff2', '.jpg': 'image/jpeg', '.mp3': 'audio/mpeg', '.wav': 'audio/wav' };
 
+let OFFLINE = flag('offline');
+if (!OFFLINE) {
+  try {
+    const r = await fetch(PROD + '/api/oembed?url=' + encodeURIComponent('https://youtu.be/8WSyoITbP-c'),
+      { signal: AbortSignal.timeout(4000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+  } catch (e) {
+    OFFLINE = true;
+  }
+}
+if (OFFLINE) console.log('[hudshot] production unreachable or --offline: serving fixtures for /api/* and thumbnails');
+const FIXTURE = JSON.parse(await readFile(join(FIX, 'videos.json'), 'utf8'));
+function fixtureOembed(id) {
+  const v = FIXTURE.videos.find(x => x.id === id);
+  return v ? { title: v.title, channel: v.channel } : { title: 'Fixture video ' + id, channel: 'Fixture channel' };
+}
+function fixtureVideos(seed, n) {
+  const all = FIXTURE.videos;
+  let h = 0; for (const ch of String(seed)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const out = [];
+  for (let i = 0; i < Math.min(n, all.length); i++) out.push(all[(h + i) % all.length]);
+  return out.map(v => Object.assign({}, v, { thumb: 'https://i.ytimg.com/vi/' + v.id + '/mqdefault.jpg',
+    meta: [v.duration, v.views, v.when].filter(Boolean).join(' · ') }));
+}
+function fixtureApi(u) {
+  const q = Object.fromEntries(u.searchParams);
+  const p = u.pathname;
+  if (p === '/api/search' || (p === '/api/feed' && (q.mode === 'search' || q.q))) {
+    const term = String(q.q || '').trim();
+    if (!term) return { body: { ok: false, error: 'Type something to search.' } };
+    return { body: { ok: true, q: term, videos: fixtureVideos(term, Number(q.limit) || 20) } };
+  }
+  if (p === '/api/suggest' || (p === '/api/feed' && q.mode === 'suggest')) {
+    const t = String(q.q || '').toLowerCase();
+    const words = ['music', 'live', 'review', 'tutorial', 'podcast', 'highlights'];
+    return { body: { ok: true, suggestions: t ? words.map(w => t + ' ' + w) : [] } };
+  }
+  if (p === '/api/feed') {
+    const ch = String(q.channel || q.handle || q.url || '');
+    if (!ch) return { body: { ok: false, error: 'channel required' } };
+    const name = (FIXTURE.channels[ch] || 'Fixture channel');
+    return { body: { ok: true, channel: name, videos: fixtureVideos(ch, 15).map(v => Object.assign(v, { channel: name })) } };
+  }
+  if (p === '/api/oembed') {
+    const m = String(q.url || '').match(/([A-Za-z0-9_-]{11})/);
+    return { body: Object.assign({ ok: true }, fixtureOembed(m ? m[1] : '')) };
+  }
+  if (p === '/api/watch') {
+    if (q.probe) return { body: { ok: false, error: 'offline fixture: no server resolve' } };
+    return { status: 502, body: { ok: false, error: 'offline fixture: proxy unavailable' } };
+  }
+  return { status: 404, body: { ok: false, error: 'offline fixture: no handler for ' + p } };
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, 'http://x');
     if (u.pathname === '/api/pair' || u.pathname === '/api/account') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      if (req.method === 'POST') return res.end(JSON.stringify({ ok: true, code: 'TESTQA', token: 'local-test-token', paired: PAIRED }));
+      if (req.method === 'POST') {
+        const c = []; for await (const d of req) c.push(d);
+        const raw = Buffer.concat(c).toString();
+        let b = null; try { b = raw ? JSON.parse(raw) : null; } catch (e) {}
+        if (b && Object.keys(b).length) console.log('[pair-post]', raw.slice(0, 300));
+        return res.end(JSON.stringify({ ok: true, code: 'TESTQA', token: 'local-test-token', paired: PAIRED }));
+      }
       let dest = null, seq = 0;
       if (PUSH_IDS.length && Date.now() - started > PUSH_AFTER) {
         if (!pushDest) pushDest = await buildPush();
         dest = pushDest; seq = 1;
+        if (PUSH2_AFTER && Date.now() - started > PUSH2_AFTER) seq = 2;
       }
-      return res.end(JSON.stringify({ ok: true, code: 'TESTQA', paired: PAIRED, dest, destSeq: seq }));
+      const out = { ok: true, code: 'TESTQA', paired: PAIRED, dest, destSeq: seq };
+      const build = await readBuild();
+      if (build) out.build = build;
+      return res.end(JSON.stringify(out));
     }
-    if (u.pathname === '/api/watch' && req.method === 'POST') {
+    if ((u.pathname === '/api/watch' || u.pathname === '/api/diag') && req.method === 'POST') {
       const c = []; for await (const d of req) c.push(d);
       console.log('[hud-report]', Buffer.concat(c).toString().slice(0, 300));
       res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{"ok":true}');
+    }
+    if (u.pathname.startsWith('/api/') && OFFLINE) {
+      const fx = fixtureApi(u);
+      res.writeHead(fx.status || 200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify(fx.body));
     }
     if (u.pathname.startsWith('/api/')) {
       const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await new Promise(r => {
@@ -126,8 +243,36 @@ function findChrome() {
 
 await mkdir(OUT, { recursive: true });
 const browser = await chromium.launch({ executablePath: findChrome(), headless: true,
-  args: ['--autoplay-policy=no-user-gesture-required'] });
+  args: ['--autoplay-policy=' + AUTOPLAY] });
 const ctx = await browser.newContext({ viewport: { width: 600, height: 600 }, userAgent: UA, deviceScaleFactor: 1 });
+// googlevideo: serve --media files (or the status asked for).
+await ctx.route(/^https:\/\/[^/]*googlevideo\.com\//, async route => {
+  const m = route.request().url().match(/[?&]id=o-([A-Za-z0-9_-]{11})/);
+  const media = m ? MEDIA[m[1]] : undefined;
+  if (typeof media === 'number') return route.fulfill({ status: media, body: 'refused' });
+  if (!media || !existsSync(media)) return route.fulfill({ status: 404, body: 'no media' });
+  const buf = await readFile(media);
+  const ctype = media.endsWith('.webm') ? 'video/webm' : 'video/mp4';
+  const range = route.request().headers()['range'];
+  const mm = range && range.match(/bytes=(\d+)-(\d*)/);
+  if (mm) {
+    const a = Number(mm[1]), b = mm[2] ? Math.min(Number(mm[2]), buf.length - 1) : buf.length - 1;
+    return route.fulfill({ status: 206, body: buf.subarray(a, b + 1), headers: {
+      'content-type': ctype, 'accept-ranges': 'bytes',
+      'content-range': 'bytes ' + a + '-' + b + '/' + buf.length } });
+  }
+  return route.fulfill({ status: 200, body: buf, headers: { 'content-type': ctype, 'accept-ranges': 'bytes' } });
+});
+if (OFFLINE) {
+  const thumbs = readdirSync(join(FIX, 'thumbs')).filter(f => f.endsWith('.jpg')).sort();
+  await ctx.route(/^https:\/\/i\.ytimg\.com\//, async route => {
+    const m = route.request().url().match(/\/vi\/([^/]+)\//);
+    let h = 0; for (const ch of (m ? m[1] : 'x')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return route.fulfill({ status: 200, contentType: 'image/jpeg', body: await readFile(join(FIX, 'thumbs', thumbs[h % thumbs.length])) });
+  });
+  // Anything else off-box would hang on the blocked network: fail it fast.
+  await ctx.route(/^https?:\/\/(?!127\.0\.0\.1|localhost|[^/]*googlevideo\.com|i\.ytimg\.com)/, route => route.abort('internetdisconnected'));
+}
 const page = await ctx.newPage();
 const errors = [];
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });

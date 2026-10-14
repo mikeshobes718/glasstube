@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/push.js": {
+      "maxDuration": 60
+    }
+  },
   "headers": [
     {
       "source": "/(.*)",
@@ -24,6 +29,19 @@
         {
           "key": "Content-Type",
           "value": "application/manifest+json"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=300"
+        }
+      ]
+    },
+    {
+      "source": "/.well-known/meta-wearables-manifest.json",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/json; charset=utf-8"
         },
         {
           "key": "Cache-Control",
@@ -93,6 +111,10 @@
     {
       "source": "/api/search",
       "destination": "/api/feed?mode=search"
+    },
+    {
+      "source": "/api/suggest",
+      "destination": "/api/feed?mode=suggest"
     }
   ]
 }

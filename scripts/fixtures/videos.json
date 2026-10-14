@@ -1,0 +1,213 @@
+{
+ "_note": "Layout fixtures for scripts/hudshot.mjs when production is unreachable. Not real data.",
+ "channels": {
+  "UCAuUUnT6oDeKwE6v1NGQxug": "TED Talks",
+  "UCLA_DiR1FfKNvjuUpBHmylQ": "NASA",
+  "UCHnyfMqiRRG1u-2MsSQLbXA": "Veritasium",
+  "UCsXVk37bltHxD1rDPwtNM8Q": "Kurzgesagt",
+  "UC6nSFpj9HTCZ5t-N3Rm3-HA": "Vsauce",
+  "UCBJycsmduvYEL83R_U4JriQ": "MKBHD"
+ },
+ "videos": [
+  {
+   "id": "8WSyoITbP-c",
+   "title": "How the James Webb telescope sees the first galaxies",
+   "channel": "NASA",
+   "duration": "14:13",
+   "seconds": 853,
+   "views": "2.1M views",
+   "when": "3 weeks ago",
+   "live": false
+  },
+  {
+   "id": "dQw4w9WgXcQ",
+   "title": "Rick Astley - Never Gonna Give You Up (Official Video)",
+   "channel": "Rick Astley",
+   "duration": "3:33",
+   "seconds": 213,
+   "views": "1.6B views",
+   "when": "15 years ago",
+   "live": false
+  },
+  {
+   "id": "aQ9r1bX0kLm",
+   "title": "The surprising physics of a spinning top",
+   "channel": "Veritasium",
+   "duration": "18:42",
+   "seconds": 1122,
+   "views": "5.4M views",
+   "when": "1 month ago",
+   "live": false
+  },
+  {
+   "id": "bT2s8cY1mNo",
+   "title": "Why the ocean is salty but rivers are not",
+   "channel": "Kurzgesagt",
+   "duration": "9:58",
+   "seconds": 598,
+   "views": "8.8M views",
+   "when": "2 years ago",
+   "live": false
+  },
+  {
+   "id": "cU3t7dZ2oPq",
+   "title": "iPhone 18 Pro review: the battery finally caught up",
+   "channel": "MKBHD",
+   "duration": "16:05",
+   "seconds": 965,
+   "views": "4.2M views",
+   "when": "5 days ago",
+   "live": false
+  },
+  {
+   "id": "dV4u6eA3pQr",
+   "title": "What if the Moon disappeared tomorrow?",
+   "channel": "Vsauce",
+   "duration": "22:17",
+   "seconds": 1337,
+   "views": "11M views",
+   "when": "4 years ago",
+   "live": false
+  },
+  {
+   "id": "eW5v5fB4qRs",
+   "title": "The art of the lunar landing: every second of Apollo 11 explained",
+   "channel": "NASA",
+   "duration": "41:09",
+   "seconds": 2469,
+   "views": "890K views",
+   "when": "2 months ago",
+   "live": false
+  },
+  {
+   "id": "fX6w4gC5rSt",
+   "title": "How a 1,000 year old bridge still stands",
+   "channel": "TED Talks",
+   "duration": "12:30",
+   "seconds": 750,
+   "views": "1.2M views",
+   "when": "1 year ago",
+   "live": false
+  },
+  {
+   "id": "gY7x3hD6sTu",
+   "title": "Lofi beats to study and relax to - autumn mix",
+   "channel": "Lofi Girl",
+   "duration": "1:02:44",
+   "seconds": 3764,
+   "views": "320K views",
+   "when": "1 week ago",
+   "live": false
+  },
+  {
+   "id": "hZ8y2iE7tUv",
+   "title": "The longest straight road in the world",
+   "channel": "Tom Scott",
+   "duration": "8:14",
+   "seconds": 494,
+   "views": "3.3M views",
+   "when": "3 years ago",
+   "live": false
+  },
+  {
+   "id": "iA9z1jF8uVw",
+   "title": "Building a cabin in the forest from scratch, alone, over one winter",
+   "channel": "Off Grid",
+   "duration": "28:51",
+   "seconds": 1731,
+   "views": "6.7M views",
+   "when": "8 months ago",
+   "live": false
+  },
+  {
+   "id": "jB0a0kG9vWx",
+   "title": "Every planet ranked by how likely it is to host life",
+   "channel": "Kurzgesagt",
+   "duration": "13:02",
+   "seconds": 782,
+   "views": "2.9M views",
+   "when": "6 months ago",
+   "live": false
+  },
+  {
+   "id": "kC1b9lH0wXy",
+   "title": "Coffee: the full science of a perfect espresso",
+   "channel": "James Hoffmann",
+   "duration": "19:40",
+   "seconds": 1180,
+   "views": "1.8M views",
+   "when": "4 months ago",
+   "live": false
+  },
+  {
+   "id": "lD2c8mI1xYz",
+   "title": "The insane engineering of the Falcon 9 landing legs",
+   "channel": "Real Engineering",
+   "duration": "17:26",
+   "seconds": 1046,
+   "views": "2.4M views",
+   "when": "1 year ago",
+   "live": false
+  },
+  {
+   "id": "mE3d7nJ2yZa",
+   "title": "Why you can't sleep after scrolling",
+   "channel": "TED Talks",
+   "duration": "11:11",
+   "seconds": 671,
+   "views": "760K views",
+   "when": "2 weeks ago",
+   "live": false
+  },
+  {
+   "id": "nF4e6oK3zAb",
+   "title": "Top 10 goals of the season",
+   "channel": "Premier League",
+   "duration": "10:03",
+   "seconds": 603,
+   "views": "5.0M views",
+   "when": "3 days ago",
+   "live": false
+  },
+  {
+   "id": "oG5f5pL4aBc",
+   "title": "A day in the life of an astronaut on the ISS",
+   "channel": "NASA",
+   "duration": "24:36",
+   "seconds": 1476,
+   "views": "1.1M views",
+   "when": "9 months ago",
+   "live": false
+  },
+  {
+   "id": "pH6g4qM5bCd",
+   "title": "The math behind perfect shuffles",
+   "channel": "Numberphile",
+   "duration": "15:47",
+   "seconds": 947,
+   "views": "990K views",
+   "when": "5 years ago",
+   "live": false
+  },
+  {
+   "id": "qI7h3rN6cDe",
+   "title": "Walking tour of Kyoto at night, 4K",
+   "channel": "Rambalac",
+   "duration": "1:14:20",
+   "seconds": 4460,
+   "views": "210K views",
+   "when": "2 years ago",
+   "live": false
+  },
+  {
+   "id": "rJ8i2sO7dEf",
+   "title": "This tiny robot can climb walls",
+   "channel": "Veritasium",
+   "duration": "20:08",
+   "seconds": 1208,
+   "views": "3.7M views",
+   "when": "7 months ago",
+   "live": false
+  }
+ ]
+}

@@ -1,8 +1,87 @@
 import { rpc, rpcConfigured, readBody, json } from './_rpc.js';
 import { parseYouTube, oembed, keepPlayable, resolveHandle, channelFeed, playlistFeed } from './_yt.js';
+import {
+  deliveryRead, deliveryVerdict, notCheckedInText, SETTLED, SEEN_STALE_S, SUPERSEDED_TEXT,
+} from './_delivery.js';
 
 const VIDEO_RE = /^[a-zA-Z0-9_-]{11}$/;
 const MAX_PLAYLIST = 20;
+
+/* WP6: how long a video push waits for the glasses to confirm.
+
+   The plan allows 12s of waiting, but the iPhone app's push request (iOS
+   StreamResolver.postPush) runs on a URLSession whose request timeout is 12s
+   of silence. A reply slower than that reads on the phone as "No internet.
+   Retrying..." - worse than any honest answer. So the whole handler, resolve
+   included, stays inside BUDGET_MS from its first line, which leaves room for
+   a cold start and the round trip. Raise BUDGET_MS to about 13000 once every
+   phone runs a build whose push request allows 30s (iOS change in hud-wp6). */
+const WAIT_MS = 12000;
+const BUDGET_MS = 9500;
+const POLL_MS = 400;
+const CONSUMED_MS = 700;
+
+const sleep = ms => new Promise(r => setTimeout(r, Math.max(0, ms)));
+
+function firstNum() {
+  for (const v of arguments) {
+    if (v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v))) return Number(v);
+  }
+  return null;
+}
+
+/* Wait for the glasses to say what happened to this push. `before` is the
+   delivery row read just before the push went in; null means the backend
+   cannot say (migration not run, or unreachable), and then the answer is
+   today's immediate ok:true. */
+async function confirmDelivery(code, out, before, t0) {
+  if (!before) {
+    return { delivery: { state: 'unknown', glassesSeenS: null, glassesBuild: null } };
+  }
+  const info = state => ({ state, glassesSeenS: before.seenS, glassesBuild: before.build });
+  if (before.seenS === null || before.seenS > SEEN_STALE_S) {
+    // The push stays pending; the glasses pick it up when GlassTube opens.
+    return { ok: false, error: notCheckedInText(before.seenS), delivery: info('away') };
+  }
+  if (!before.build) {
+    // The glasses run a build from before delivery reports: nothing to wait for.
+    return { delivery: info('sent') };
+  }
+  const end = Math.min(Date.now() + WAIT_MS, t0 + BUDGET_MS);
+  const deadline = end - CONSUMED_MS;
+  let seq = firstNum(out && out.destSeq, out && out.dest_seq, out && out.seq);
+  let got = false;
+  while (Date.now() < deadline) {
+    const d = await deliveryRead(code, Math.max(300, Math.min(3000, deadline - Date.now())));
+    if (d) {
+      if (seq === null) seq = d.destSeq;
+      if (seq !== null && d.ackSeq === seq && d.ackState) {
+        if (SETTLED[d.ackState]) {
+          return Object.assign({}, deliveryVerdict(d.ackState, d.ackDetail), { delivery: info(d.ackState) });
+        }
+        if (d.ackState === 'got') got = true;
+      }
+    }
+    await sleep(Math.min(POLL_MS, deadline - Date.now()));
+  }
+  // No report, yet the push was taken off the row: the glasses (or a HUD on a
+  // path that does not report) picked it up, so the delivery data is behind.
+  // Answer what the legacy server did, not "Not picked up yet".
+  if (!got && seq !== null && await consumed(code, seq, CONSUMED_MS)) {
+    return { delivery: info('unknown') };
+  }
+  const state = got ? 'got' : 'none';
+  return Object.assign({}, deliveryVerdict(state), { delivery: info(state) });
+}
+
+/* Has push `seq` been acked on the row itself (legacy ack)? false when unsure. */
+async function consumed(code, seq, ms) {
+  let timer = null;
+  const late = new Promise(resolve => { timer = setTimeout(() => resolve(null), ms); });
+  const p = await Promise.race([rpc('glasstube_poll', { p_code: code }).catch(() => null), late]);
+  clearTimeout(timer);
+  return !!(p && p.ok && !p.dest && firstNum(p.destSeq) !== null && firstNum(p.destSeq) >= seq);
+}
 
 function isGoogleFile(u) {
   return /^https:\/\/[a-z0-9.-]*googlevideo\.com\//i.test(u) &&
@@ -84,6 +163,7 @@ function pack(videos, name, app) {
 }
 
 export default async function handler(req, res) {
+  const t0 = Date.now();
   if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'POST only' });
   if (!rpcConfigured()) {
     return json(res, 200, { ok: false, error: 'Phone pairing is not configured on the server.' });
@@ -100,8 +180,19 @@ export default async function handler(req, res) {
     return json(res, 200, { ok: false, error: 'Paste a YouTube link or send a playlist' });
   }
 
+  // WP6: read the delivery row while the videos resolve. It says whether the
+  // glasses replaced this link, and whether they have checked in lately.
+  const pre = deliveryRead(code, 2500);
+  const replaced = async () => {
+    const row = await pre;
+    if (!(row && row.superseded)) return false;
+    json(res, 200, { ok: false, moved: true, error: SUPERSEDED_TEXT });
+    return true;
+  };
+
   try {
     if (body.kind === 'session') {
+      if (await replaced()) return;
       const blob = String(body.session || '');
       const out = await rpc('glasstube_push', {
         p_code: code,
@@ -111,6 +202,7 @@ export default async function handler(req, res) {
     }
 
     if (channels) {
+      if (await replaced()) return;
       const list = channels.slice(0, 24).map(c => ({
         name: String((c && c.name) || 'Channel').slice(0, 80),
         id: String((c && c.id) || ''),
@@ -131,6 +223,7 @@ export default async function handler(req, res) {
       if (!/^UC[a-zA-Z0-9_-]{20,}$/.test(ch.id)) {
         return json(res, 200, { ok: false, error: 'That channel id looks wrong.' });
       }
+      if (await replaced()) return;
       const out = await rpc('glasstube_push', { p_code: code, p_video: ch });
       return json(res, 200, Object.assign({ ok: true }, out, { kind: 'channel', channel: ch }));
     }
@@ -181,8 +274,20 @@ export default async function handler(req, res) {
       hasU: !!first.u,
       n: videos.length,
     }));
+    if (await replaced()) return;
+    const before = await pre;
     const out = await rpc('glasstube_push', { p_code: code, p_video: payload });
-    return json(res, 200, Object.assign({}, out, { video: videos[0], videos, name: payload.playlist }));
+    const reply = Object.assign({}, out, { video: videos[0], videos, name: payload.playlist });
+    if (!out || out.ok === false) return json(res, 200, reply);
+    // WP6: 'Playing on your glasses' only once the glasses say so.
+    const verdict = await confirmDelivery(code, out, before, t0);
+    console.log('[glasstube-delivery]', JSON.stringify({
+      id: first.id || '', state: verdict.delivery.state, ms: Date.now() - t0,
+      seenS: verdict.delivery.glassesSeenS, build: verdict.delivery.glassesBuild,
+    }));
+    Object.assign(reply, verdict);
+    if (verdict.ok === true) delete reply.error;
+    return json(res, 200, reply);
   } catch (e) {
     return json(res, 200, { ok: false, error: String((e && e.message) || e) });
   }

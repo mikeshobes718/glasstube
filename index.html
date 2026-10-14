@@ -4,25 +4,16 @@
 <meta charset="UTF-8">
 <meta name="description" content="Watch YouTube on Meta Ray-Ban Display glasses">
 <meta name="mrbd-web-app-capable" content="yes">
+<meta name="application-name" content="GlassTube">
 <meta name="viewport" content="width=600, height=600, initial-scale=1.0, user-scalable=no">
 <title>GlassTube</title>
-<link rel="icon" type="image/png" href="/favicon.png?v=5">
-<link rel="shortcut icon" type="image/png" href="/favicon.png?v=5">
-<link rel="icon" type="image/png" href="/icon-96.png?v=5" sizes="96x96">
-<link rel="icon" type="image/png" href="/icon-128.png?v=5" sizes="128x128">
-<link rel="icon" type="image/png" href="/icon-192.png?v=5" sizes="192x192">
-<link rel="icon" type="image/png" href="/icon-512.png?v=5" sizes="512x512">
-<link rel="icon" type="image/x-icon" href="/favicon.ico?v=5" sizes="64x64 128x128 256x256">
+<link rel="icon" type="image/png" href="/favicon.png?v=510853de">
+<link rel="icon" type="image/png" href="/icon-192.png?v=510853de" sizes="192x192">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="apple-touch-icon" type="image/png" href="/apple-touch-icon.png?v=5" sizes="180x180">
-<link rel="apple-touch-icon-precomposed" type="image/png" href="/apple-touch-icon-precomposed.png?v=5" sizes="180x180">
-<link rel="preload" href="/icon-192.png?v=5" as="image">
+<link rel="apple-touch-icon" type="image/png" href="/apple-touch-icon.png?v=1ffc2ca3" sizes="180x180">
 <meta name="theme-color" content="#000000">
 <meta name="referrer" content="origin">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=17">
+<link rel="stylesheet" href="/styles.css?v=9aab24d1">
 <script>
 (function () {
   function onPhone() {
@@ -67,7 +58,7 @@
 })();
 </script>
 <script>
-window.GLASSTUBE_BUILD = '1.25';
+window.GLASSTUBE_BUILD = 'e8081a40';
 window.glasstubeErrors = [];
 window.glasstubeNoise = function (text, src) {
   var t = String(text || '');
@@ -114,33 +105,32 @@ window.addEventListener('unhandledrejection', function (e) {
   <header class="yt-head">
     <span class="yt-mark" aria-hidden="true"></span>
     <h1 class="title title-home">GlassTube</h1>
+    <span id="link-chip" class="link-chip link-off"><span class="chip-dot">○</span> Not linked</span>
+    <span id="build-chip" class="build-chip" aria-hidden="true"></span>
   </header>
   <div class="list list-home screen-body">
+    <button class="focusable menu-btn hidden" id="btn-missed" data-menu="missed"><span class="missed-tag">! Missed from iPhone<small id="missed-sub"></small></span><span id="missed-title" class="missed-title"></span></button>
     <button class="focusable menu-btn hidden" id="btn-continue" data-menu="continue">Continue<small id="continue-sub"></small></button>
-    <button class="focusable menu-btn hidden" data-menu="queue">Queue<small></small></button>
-    <button class="focusable menu-btn" data-menu="search">Search<small>Type with the band, play here</small></button>
+    <button class="focusable menu-btn" data-menu="search">Search</button>
     <button class="focusable menu-btn" data-menu="phone">From iPhone<small>Paste a YouTube link, it plays here</small></button>
-    <button class="focusable menu-btn hidden" data-menu="library">Library<small>Subscriptions, playlists, liked</small></button>
     <button class="focusable menu-btn" data-menu="recents">Recents</button>
-    <button class="focusable menu-btn" data-menu="channels">Channels<small>Your list from the phone</small></button>
-    <button class="focusable menu-btn" data-menu="playlists">Playlists<small>Lists you sent from the iPhone</small></button>
+    <button class="focusable menu-btn" data-menu="channels">Channels</button>
+    <button class="focusable menu-btn" data-menu="playlists">Playlists</button>
+    <button class="focusable menu-btn hidden" data-menu="library">Library<small>Subscriptions, playlists, liked</small></button>
     <button class="focusable menu-btn" data-menu="settings">Settings</button>
-    <button class="focusable menu-btn" data-menu="debug">Diagnostics</button>
   </div>
 </section>
 
 <section id="screen-list" class="screen hidden">
-  <h2 id="list-title" class="title"></h2>
+  <div class="list-head"><h2 id="list-title" class="title"></h2><span id="list-count" class="list-count"></span></div>
   <div id="list-items" class="list screen-body"></div>
-  <div id="list-back" class="list back-row"></div>
 </section>
 
 <section id="screen-player" class="screen screen-flush hidden">
   <div id="yt-wrap">
-    <div id="yt-slot"><iframe id="yt-host" src="about:blank" referrerpolicy="origin" allow="autoplay; encrypted-media; picture-in-picture" tabindex="-1"></iframe></div>
+    <div id="yt-slot"><iframe id="yt-host" src="about:blank" referrerpolicy="origin" allow="autoplay; encrypted-media; picture-in-picture" tabindex="-1" aria-hidden="true"></iframe></div>
+    <div id="yt-video-slot" class="hidden"><video id="yt-video" playsinline webkit-playsinline disablepictureinpicture preload="auto" muted></video></div>
     <img id="yt-poster" alt="">
-    <div id="player-bar"><div id="player-buffer"></div><div id="player-fill"></div></div>
-    <div id="player-time">0:00 / 0:00</div>
     <div id="load-gate" class="load-gate">
       <div class="load-spin"></div>
       <div id="load-gate-title" class="load-gate-title">YouTube video</div>
@@ -148,34 +138,68 @@ window.addEventListener('unhandledrejection', function (e) {
     </div>
     <div id="play-gate" class="play-gate hidden">
       <div id="play-gate-title" class="play-gate-title"></div>
-      <div id="play-gate-msg" class="play-gate-msg">Enter to play</div>
+      <div class="play-gate-pill"><span class="play-gate-glyph" aria-hidden="true"></span><span id="play-gate-msg" class="play-gate-msg">Pinch to play</span></div>
+      <div id="play-gate-sub" class="play-gate-sub"></div>
     </div>
   </div>
-  <div class="player-meta">
-    <div id="player-title">Loading...</div>
-    <div id="player-channel"></div>
-    <div id="player-next"></div>
-    <div id="player-hint">Enter play · Up last · Down next · Left back · Right +10s</div>
-    <div id="player-error" class="hidden"></div>
-    <div id="player-relay" class="hidden relay-offer">
-      <button class="focusable back-btn" id="btn-relay">Play from the phone instead<span class="back-hint">leaves the HUD</span></button>
+  <div id="player-chrome">
+    <div id="player-top">
+      <div id="player-title">Loading...</div>
+      <div id="player-channel"></div>
     </div>
+    <div id="player-bottom">
+      <div id="player-bar"><div id="player-buffer"></div><div id="player-fill"></div><div id="player-knob"></div></div>
+      <div class="player-row"><span id="player-time">0:00 / 0:00</span><span id="player-seek"></span><span id="player-next"></span></div>
+      <div id="player-hint">pinch pause · &#x25B6;&#xFE0E; +10s · &#x25B2;&#xFE0E; &minus;10s · &#x25BC;&#xFE0E; menu · &#x25C0;&#xFE0E;&#x25C0;&#xFE0E; exit</div>
+      <div id="player-upnext">
+        <div class="upnext-line"><span id="upnext-title"></span><span id="upnext-count"></span></div>
+        <div class="upnext-hint">pinch play now · &#x25C0;&#xFE0E; cancel</div>
+      </div>
+    </div>
+  </div>
+  <div id="player-fault">
+    <div id="player-error" class="hidden"></div>
+    <div id="player-actions">
+      <div id="player-relay" class="hidden relay-offer">
+        <button class="player-action" id="btn-relay" tabindex="-1">Pinch: play from phone</button>
+      </div>
+      <div id="player-action-next" class="player-action hidden">Swipe down: next video</div>
+      <div class="player-action">Swipe left: back</div>
+    </div>
+  </div>
+  <div id="player-menu" class="player-menu hidden">
+    <button class="focusable pm-row" data-act="next">Next video<span class="pm-val" id="pm-next"></span></button>
+    <button class="focusable pm-row" data-act="prev">Previous</button>
+    <button class="focusable pm-row" data-act="restart">Restart</button>
+    <button class="focusable pm-row pm-cycle" data-act="speed">Speed<span class="pm-val" id="pm-speed">1x</span></button>
+    <button class="focusable pm-row pm-cycle" data-act="sound">Sound<span class="pm-val" id="pm-sound">On</span></button>
+    <button class="focusable pm-row pm-cycle" data-act="picture">Picture<span class="pm-val" id="pm-picture">Video</span></button>
+    <button class="focusable pm-row pm-cycle" data-act="sleep">Sleep timer<span class="pm-val" id="pm-sleep">Off</span></button>
   </div>
 </section>
 
 <section id="screen-search" class="screen hidden">
   <h2 class="title">Search</h2>
-  <div id="kb-text" class="kb-text kb-empty">Type a search</div>
-  <div id="kb-recent" class="kb-recent hidden"></div>
-  <div id="kb-grid" class="kb-grid"></div>
-  <div class="list back-row">
-    <button class="focusable back-btn" id="btn-search-back">Back <span class="back-hint">swipe left</span></button>
+  <div id="kb-field" class="kb-field">
+    <input id="kb-input" class="kb-input" type="search" enterkeyhint="search"
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+      maxlength="60" placeholder="Pinch to speak or type" aria-label="Search">
   </div>
+  <div class="kb-chips-row">
+    <div id="kb-chips" class="kb-chips"></div>
+    <span id="kb-hint" class="kb-hint hidden">▲ suggestions</span>
+  </div>
+  <div id="kb-grid" class="kb-grid"></div>
 </section>
 
 <section id="screen-phone" class="screen hidden">
   <h2 class="title">From iPhone</h2>
   <div class="screen-body">
+    <div id="pair-linked" class="pair-linked hidden">
+      <div class="pair-linked-head"><span class="pair-ok">✓</span> Linked to your iPhone</div>
+      <div id="pair-last" class="pair-last"></div>
+      <div id="pair-linked-code" class="pair-linked-code"></div>
+    </div>
     <div id="pair-code" class="pair-code">------</div>
     <div id="pair-help" class="pair-help">Getting a code...</div>
     <ol id="pair-steps" class="pair-steps">
@@ -183,10 +207,10 @@ window.addEventListener('unhandledrejection', function (e) {
       <li>Type this code</li>
       <li>Paste a YouTube link and send</li>
     </ol>
+    <div class="pair-foot">Old version? Middle-finger tap on Home, then Restart.</div>
   </div>
   <div class="list back-row">
-    <button class="focusable menu-btn" id="btn-pair-new">New code</button>
-    <button class="focusable back-btn" id="btn-phone-back">Back <span class="back-hint">swipe left</span></button>
+    <button class="focusable menu-btn" id="btn-pair-new">Link a different phone</button>
   </div>
 </section>
 
@@ -196,34 +220,35 @@ window.addEventListener('unhandledrejection', function (e) {
     <button class="focusable menu-btn" id="btn-sound">Sound<small id="sound-state">On</small></button>
     <button class="focusable menu-btn" id="btn-captions">Captions<small id="captions-state">Off</small></button>
     <button class="focusable menu-btn" id="btn-speed">Speed<small id="speed-state">1x</small></button>
-    <button class="focusable menu-btn" id="btn-repeat">Repeat<small id="repeat-state">All</small></button>
+    <button class="focusable menu-btn" id="btn-repeat">Repeat<small id="repeat-state">Off</small></button>
     <button class="focusable menu-btn" id="btn-shuffle">Shuffle<small id="shuffle-state">Off</small></button>
     <button class="focusable menu-btn" id="btn-picture">Picture<small id="picture-state">Video</small></button>
     <button class="focusable menu-btn" id="btn-sleep">Sleep timer<small id="sleep-state">Off</small></button>
-  </div>
-  <div class="list back-row">
-    <button class="focusable back-btn" id="btn-settings-back">Back <span class="back-hint">swipe left</span></button>
+    <button class="focusable menu-btn" id="btn-debug">Diagnostics</button>
   </div>
 </section>
 
 <section id="screen-debug" class="screen hidden">
   <h2 class="title">Diagnostics</h2>
+  <div id="input-log" class="input-log hidden"></div>
   <div id="debug-rows" class="debug-rows screen-body"></div>
   <textarea id="debug-log" readonly rows="8"></textarea>
   <div id="debug-copy-msg" class="pair-help"></div>
   <div class="list back-row">
+    <button class="focusable back-btn" id="btn-input-test">Input test</button>
     <button class="focusable back-btn" id="btn-copy-debug">Copy errors</button>
     <button class="focusable back-btn" id="btn-retest">Run self-test</button>
-    <button class="focusable back-btn" id="btn-debug-back">Back <span class="back-hint">swipe left</span></button>
   </div>
 </section>
 
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 <div id="status" class="status hidden"></div>
+<div id="nav-foot" class="nav-foot hidden" aria-hidden="true">◀ Back</div>
 
-<script src="/sound.js?v=7"></script>
-<script src="/prefs.js?v=7"></script>
-<script src="/player.js?v=25"></script>
-<script src="/app.js?v=36"></script>
+<script src="/sound.js?v=532aca8d"></script>
+<script src="/prefs.js?v=466929eb"></script>
+<script src="/player.js?v=df12f688"></script>
+<script src="/app.js?v=479d2d63"></script>
 </div>
 </body>
 </html>

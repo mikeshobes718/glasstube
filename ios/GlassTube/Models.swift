@@ -82,6 +82,9 @@ struct SendOutcome {
     var hasFile: Bool
     var itag: String
     var detail: String
+    /// The glasses have it but have not confirmed playing (got, pinch, hidden,
+    /// missed). Not a failure, so the banner shows amber instead of red.
+    var pending: Bool = false
 
     static func failure(_ text: String) -> SendOutcome {
         SendOutcome(ok: false, message: text, hasFile: false, itag: "", detail: "")

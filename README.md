@@ -15,7 +15,7 @@ On the glasses:
 - Your library, once the phone sends its sign-in: subscriptions, playlists, liked, watch later
 - Recents, channels, and playlists you sent from the phone
 - Continue watching, per video: every video remembers where you left it, and lists show a red progress line on the thumbnail
-- Neural Band: Enter play/pause, Down next, Left back (or previous if you just started a video), Right +10s, Up -10s
+- Neural Band in the player: pinch play/pause, swipe right +10s, swipe up -10s, swipe down for the player menu, swipe left twice to leave (see [Player controls](#player-controls))
 - Settings: sound, captions, speed, repeat, shuffle, audio only, sleep timer
 - Diagnostics with a self-test that says, out loud, whether the server can fetch video today and whether search still answers
 - If the network drops, it keeps retrying every few seconds
@@ -73,8 +73,20 @@ time either device spoke — so reopening the phone app reconnects on its own,
 even after the code itself has expired. The code is short lived on purpose:
 it is short enough to read off a HUD, which also makes it short enough to guess.
 
-"New code" on the glasses drops the link as well, which is how you move the
-glasses to a different phone.
+"Link a different phone" on the glasses (From iPhone, two pinches) drops the
+link as well, which is how you move the glasses to a different phone.
+
+## Updates reach the glasses on their own
+
+`npm run deploy` runs `scripts/stamp.mjs` and then `vercel --prod`. The stamp
+gives every file the page loads a content hash (`?v=`) and writes one build id
+into `index.html` and `api/_build.js`; `/api/pair` returns it on every poll. A
+HUD that sees a different build reloads itself the next time it sits idle on
+Home for 20 seconds, or the moment the wearer reopens GlassTube, never in the
+player or mid-search, and at most once per build. The new build shows as
+`v<build>` on Home for three seconds after launch, and Diagnostics lists the
+build, the server's build and the last poll. A page from before this existed
+needs one manual restart: middle-finger tap on the home screen, then Restart.
 
 ## Not breaking it again
 
@@ -149,6 +161,37 @@ where it lived.
 `phone.html` is still served at `/phone` as the browser fallback for anyone
 without the app installed.
 
+## Player controls
+
+While a video plays only the picture is lit, centred on the lens. Any swipe
+brings back the title band above and the progress band below for 3 seconds.
+No single swipe skips or quits a video.
+
+| Gesture | In the player |
+| --- | --- |
+| Pinch | Play or pause. If the video started muted, a pinch turns the sound on instead |
+| Swipe right | +10s. Repeats within a second go +30s, then +60s |
+| Swipe up | -10s, the same way. Always rewind, never "previous" |
+| Swipe down | Player menu: Next video, Previous, Restart, Speed, Sound, Picture, Sleep timer |
+| Swipe left | Shows "Swipe left again to leave"; a second left within 2.5s leaves |
+| System Back | Leaves at once |
+
+In the menu, swipe up and down to move, pinch to choose or change a value
+(swipe right also changes it), and swipe left to close. It closes by itself
+after 6 seconds. Changes apply to the playing video without reloading it.
+Previous on the first video restarts it.
+
+When a video ends and another follows, an "Up next" card counts down 5
+seconds: pinch plays it now, swipe left cancels. At the end of a list the
+glasses say "Finished": pinch replays the list, swipe left leaves. Repeat is
+off by default, and a list sent from the phone never loops.
+
+If nothing can play a video, the picture is replaced by one sentence saying
+why, plus what each gesture does: pinch to play it from the phone (when the
+phone offered its relay), swipe down for the next video (in a list), swipe
+left to go back. Leaving the player lands on the list with the video you were
+watching focused and labelled "Resume · 12:34".
+
 ## Settings
 
 | Control | What it does |
@@ -156,7 +199,7 @@ without the app installed.
 | Sound | Mute or unmute |
 | Captions | English captions when the video has them (embed routes only) |
 | Speed | 1x, 1.25x, 1.5x, 2x |
-| Repeat | Off, one video, or the whole list |
+| Repeat | Off (default), one video, or the whole list. Lists sent from the phone never loop |
 | Shuffle | Random order on Play all and phone sends |
 | Picture | Full video, or audio only with the poster |
 | Sleep timer | Stops playback after 15, 30, 45, or 60 minutes |

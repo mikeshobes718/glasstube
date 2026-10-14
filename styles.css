@@ -1,18 +1,38 @@
-/* Matched to YouTube iOS Library / Watch later, and YouTube Music now playing.
-   https://mobbin.com/screens/4e5ec32c-c443-4a44-93c2-1657a8d0623c
-   https://mobbin.com/screens/4fa75cb4-ebb0-4164-b9b2-87bb22602f84
-   https://mobbin.com/screens/1bcd4d18-b613-4654-ae4e-82a53d4fdfd0 */
+/* GlassTube HUD for the Meta Ray-Ban Display: a 600x600 additive panel.
+   Black adds no light, so on the lens it is see-through; every colour here
+   is an amount of light. Design system: docs/hud-plan/PLAN.md. */
+
+/* WP2: design tokens. Nothing on the HUD uses a grey that is not one of these,
+   and no text is darker than --t3 (which is for hints only, 18px and up). */
+:root {
+  --bg: #000000;
+  --t1: #ffffff;
+  --t2: #cfd3d9;
+  --t3: #aaafb9;
+  --accent: #ff3d3d;
+  --ok: #4ff08f;
+  --warn: #ffc24a;
+  --err: #ff7a70;
+  --hair: rgba(255, 255, 255, 0.28);
+  --track: rgba(255, 255, 255, 0.22);
+  --buffer: rgba(255, 255, 255, 0.45);
+  --surface: #1c1e21;
+  --ease: cubic-bezier(0.6, 0, 0.4, 1);
+}
 
 html, body {
   margin: 0;
   padding: 0;
   width: 100%;
   height: 100%;
-  background: #000;
+  background: var(--bg);
   overflow: hidden;
-  color: #f1f1f1;
-  font-family: Roboto, 'YouTube Sans', -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+  color: var(--t1);
+  font-family: 'Noto Sans', Roboto, system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
 }
+
+button { font-family: inherit; }
 
 #stage {
   position: absolute;
@@ -21,10 +41,12 @@ html, body {
   width: 600px;
   height: 600px;
   overflow: hidden;
-  background: #000;
+  background: var(--bg);
   transform-origin: 0 0;
 }
 
+/* Zones: 0-24 system bar, 24-88 header, 88-552 content, 556-580 footer.
+   24px side inset, so content runs x 24-576. */
 .screen {
   position: relative;
   width: 600px;
@@ -32,7 +54,7 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  padding: 12px 16px 40px;
+  padding: 24px 24px 20px;
   box-sizing: border-box;
 }
 
@@ -41,7 +63,7 @@ html, body {
 .yt-mark {
   width: 36px;
   height: 26px;
-  background: #ff0000;
+  background: var(--accent);
   border-radius: 8px;
   position: relative;
   flex: 0 0 auto;
@@ -53,16 +75,17 @@ html, body {
   top: 6px;
   border-style: solid;
   border-width: 7px 0 7px 12px;
-  border-color: transparent transparent transparent #fff;
+  border-color: transparent transparent transparent var(--t1);
 }
 
 .yt-head {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 48px;
-  margin: 0 0 8px;
-  padding: 0 4px;
+  height: 64px;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
 }
 
 .splash {
@@ -75,16 +98,9 @@ html, body {
   justify-content: center;
   background: #000;
   opacity: 1;
-  transition: opacity 600ms ease;
+  transition: opacity 200ms ease;
 }
 .splash-out { opacity: 0; pointer-events: none; }
-.splash-icon {
-  width: 96px;
-  height: 68px;
-  border-radius: 18px;
-  object-fit: cover;
-  box-shadow: 0 0 0 0 transparent;
-}
 .splash .yt-mark {
   width: 96px;
   height: 68px;
@@ -96,57 +112,82 @@ html, body {
   border-width: 16px 0 16px 28px;
 }
 .splash-name {
-  margin-top: 22px;
-  font-size: 28px;
+  margin-top: 24px;
+  font-size: 32px;
+  line-height: 40px;
   font-weight: 700;
-  color: #fff;
+  color: var(--t1);
   letter-spacing: 0;
 }
 .splash-tag {
-  margin-top: 6px;
-  font-size: 16px;
-  font-weight: 400;
-  color: #c9c9c9;
+  margin-top: 8px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t2);
 }
 .splash-credit {
   position: absolute;
-  bottom: 28px;
-  font-size: 14px;
-  color: #c9c9c9;
+  bottom: 32px;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--t3);
 }
 
 .hidden { display: none !important; }
 
+/* Screen title: 32/40/700 in the 64px header band (y 24-88). */
 .title {
-  font-size: 22px;
+  flex: 0 0 auto;
+  height: 64px;
+  margin: 0;
+  padding: 12px 0;
+  box-sizing: border-box;
+  font-size: 32px;
+  line-height: 40px;
   font-weight: 700;
-  color: #fff;
-  margin: 4px 4px 14px;
+  color: var(--t1);
   letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .title-home {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  height: auto;
   margin: 0;
-  font-size: 22px;
-  font-weight: 700;
+  padding: 0;
 }
 
-.title-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
+/* WP1: launch stamp. The build shows on Home at launch, then fades. */
+.build-chip {
+  margin-left: auto;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity 400ms var(--ease);
+  pointer-events: none;
 }
+.build-chip.chip-out { opacity: 0; }
 
 .list {
+  --gap: 4px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  gap: var(--gap);
 }
 
+/* The one scroll owner on each screen. position:relative makes it the
+   offsetParent of its rows, so reveal() can centre a row without measuring
+   the (possibly scaled) stage. */
 .screen-body {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -157,6 +198,7 @@ html, body {
   overflow-x: hidden;
   scrollbar-width: none;
   scroll-behavior: smooth;
+  scroll-padding: 24px 0;
 }
 
 .screen-body::-webkit-scrollbar { width: 0; height: 0; }
@@ -165,270 +207,318 @@ html, body {
    the fold gets flex-shrunk toward zero height and the screen looks empty. */
 .screen-body > * { flex: 0 0 auto; }
 
+/* Rows: label 28/36/600 in --t2 at rest, --t1 when focused. No fills and no
+   separators; the focus ring is the only state cue. */
 .menu-btn, .list-btn {
   width: 100%;
-  min-height: 56px;
+  min-height: 64px;
   margin: 0;
-  padding: 10px 12px;
-  font-size: 18px;
-  font-weight: 500;
-  color: #f1f1f1;
+  padding: 0 20px;
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 600;
+  color: var(--t2);
   background: transparent;
   border: 0;
-  border-radius: 0;
+  border-radius: 16px;
   text-align: left;
   cursor: pointer;
   box-sizing: border-box;
 }
 
+/* Home: 60px for a label, 80px with a status line. */
 .list-home .menu-btn {
-  min-height: 58px;
-  padding: 8px 12px;
-  font-size: 18px;
+  min-height: 60px;
+  padding: 8px 20px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
-  border-bottom: 1px solid #272727;
 }
 
-.list-home .menu-btn:last-child {
-  border-bottom: 0;
-}
-
-#btn-continue {
-  min-height: 84px;
-  margin-bottom: 6px;
-  padding: 14px 16px;
-  background: #212121;
-  border: 0;
-  border-radius: 12px;
-  border-bottom: 0;
-}
+/* The status line is a nowrap flex item; without a cap it grows to its text
+   width and runs past the row, so its ellipsis never applies. It also takes
+   the full row width: fitText measures the element, and a shrink-to-fit line
+   measured narrower on every re-render until only a word or two was left. */
+.list-home .menu-btn small { max-width: 100%; width: 100%; box-sizing: border-box; }
 
 .list-settings .menu-btn {
-  min-height: 52px;
-  padding: 8px 12px;
-  font-size: 18px;
+  min-height: 64px;
+  padding: 0 20px;
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #272727;
 }
 
+/* Settings value: right-aligned, 24/700, full white. */
 .list-settings .menu-btn small {
   display: inline;
   margin: 0;
-  font-size: 16px;
-  font-weight: 400;
-  color: #c9c9c9;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 700;
+  color: var(--t1);
 }
 
 .list-btn {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 72px;
-  padding: 8px 8px 8px 4px;
-}
-
-.list-btn img {
-  width: 128px;
-  height: 72px;
-  object-fit: cover;
-  border-radius: 8px;
-  background: #212121;
-  flex: 0 0 auto;
+  gap: 16px;
+  min-height: 64px;
+  padding: 0 20px;
 }
 
 .list-btn .list-copy {
   min-width: 0;
   flex: 1 1 auto;
+  /* 10px clear of the ring: a one-line row stays 64px, a row with a second
+     line grows to 84px (36 + 28 + 20) instead of filling 64px edge to edge. */
+  padding: 10px 0;
 }
 
+/* Text rows (channels, playlists, library) keep one line; video rows clamp
+   their title to two (below). */
 .list-btn .list-label {
   display: -webkit-box;
   width: 100%;
-  max-height: 44px;
-  font-size: 16px;
-  font-weight: 500;
-  line-height: 1.35;
   white-space: normal;
   overflow: hidden;
   text-overflow: ellipsis;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
 }
 
 .menu-btn small, .list-btn small {
   display: block;
-  font-size: 14px;
-  font-weight: 400;
-  color: #c9c9c9;
-  margin-top: 3px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t2);
+  margin-top: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Action rows - "Play all" and friends - are pills, not list rows. Red on
-   black rather than the white pill YouTube uses: on an additive display white
-   fill is a bright rectangle floating in the room, and the generic :focus
-   colour rules below would put white text on it. */
-.list-btn:not(:has(img)) {
-  min-height: 44px;
-  margin: 4px 8px 12px;
-  padding: 9px 20px;
+/* Play all: an outlined pill. White text on a red fill read poorly on the
+   additive lens, so it is white on black with a white outline (Mike,
+   2026-10-14); focus still adds the 3px ring 4px outside it. */
+.list-btn.is-action {
   width: auto;
   align-self: flex-start;
-  background: #ff0000;
-  color: #fff;
-  border-radius: 20px;
-  font-size: 16px;
+  min-height: 64px;
+  height: 64px;
+  /* Room for the ring below, so the scroll area never clips it. */
+  margin: 7px 7px 11px;
+  padding: 0 32px;
+  background: transparent;
+  border: 2px solid var(--t1);
+  box-sizing: border-box;
+  color: var(--t1);
+  border-radius: 32px;
+  font-size: 24px;
+  line-height: 30px;
   font-weight: 700;
-  box-shadow: none;
 }
 
-.list-btn:not(:has(img)) .list-label,
-.list-btn:not(:has(img)):focus .list-label {
-  color: #fff;
-  font-size: 16px;
-  font-weight: 700;
-  max-height: none;
+.list-btn.is-action .list-label { color: var(--t1); }
+
+/* A 4px black gap between the 3px ring and the outlined pill (plan: 'Focus
+   ring offset 4px'), so the ring never merges with the outline. */
+.list-btn.is-action::after {
+  inset: -7px;
+  border-radius: 39px;
 }
 
-.list-btn:not(:has(img)) small,
-.list-btn:not(:has(img)):focus small {
-  color: #ffdede;
-  font-size: 13px;
-}
+.back-row { margin-top: auto; padding-top: 0; }
 
-.list-btn:not(:has(img)):focus {
-  background: #ff0000;
-  color: #fff;
-  box-shadow: 0 0 0 3px #fff;
-}
-
-.back-row { margin-top: auto; padding-top: 8px; }
-
+/* Small secondary actions (Diagnostics actions, the relay offer): 18px, they
+   sit low so the content keeps y 88-552. Back itself is the #nav-foot hint. */
 .back-btn {
-  width: 100%;
-  min-height: 44px;
+  width: auto;
+  align-self: flex-start;
+  min-height: 28px;
   margin: 0;
-  padding: 10px 12px;
-  font-size: 16px;
+  padding: 2px 12px;
+  font-size: 18px;
+  line-height: 24px;
   font-weight: 500;
-  color: #c9c9c9;
+  color: var(--t3);
   background: transparent;
   border: 0;
-  border-radius: 0;
+  border-radius: 14px;
   text-align: left;
   cursor: pointer;
   box-sizing: border-box;
 }
 
-.back-hint { color: #8d8d8d; font-size: 14px; margin-left: 8px; }
-
-.focusable { transition: background 120ms ease, box-shadow 120ms ease; }
-.focusable:focus {
-  outline: none;
-  background: #303030;
-  box-shadow: inset 5px 0 0 #ff0000;
-  color: #fff;
+/* Focus: one style on every screen. A 3px white ring (white is about 4x
+   brighter than red on this panel) and the label going to full white.
+   Opacity only, so the change stays on the compositor. */
+.focusable {
+  position: relative;
+  transition: transform 120ms var(--ease);
 }
-.focusable:focus small { color: #e6e6e6; }
-.focusable:focus .list-label { color: #fff; }
+.focusable::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 3px solid var(--t1);
+  border-radius: 16px;
+  opacity: 0;
+  transition: opacity 240ms var(--ease);
+  pointer-events: none;
+}
+.focusable:focus { outline: none; color: var(--t1); }
+.focusable:focus::after {
+  opacity: 1;
+  transition-duration: 180ms;
+}
+.focusable:focus .list-label { color: var(--t1); }
+
+/* Pinch feedback. */
+.focusable.pressed { transform: scale(0.97); }
 
 .back-btn:focus {
-  color: #fff;
+  color: var(--t1);
 }
+.back-btn::after { border-radius: 14px; }
 
 .empty-msg {
   width: 100%;
-  font-size: 16px;
-  line-height: 1.4;
-  color: #c9c9c9;
+  box-sizing: border-box;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 500;
+  color: var(--t2);
   text-align: left;
-  padding: 28px 12px;
+  padding: 32px 20px;
 }
 
+/* Status shares the toast lane (y 500-548) and style. The black backing hides
+   the rows scrolling underneath; it adds no light, it only stops two lines of
+   text sitting on top of each other. */
 .status {
   position: absolute;
-  left: 0;
-  bottom: 0;
+  left: 24px;
+  bottom: 52px;
   z-index: 20;
-  width: 600px;
-  min-height: 34px;
-  padding: 6px 16px;
+  width: 552px;
+  min-height: 48px;
+  padding: 9px 0;
   box-sizing: border-box;
-  background: #000;
-  font-size: 14px;
-  line-height: 1.25;
-  color: #c9c9c9;
+  background: var(--bg);
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  color: var(--t1);
   text-align: left;
 }
 
-.status.status-err { color: #ff8983; }
+.status.status-err { color: var(--err); }
+.status.status-err::before { content: '! '; }
 
 body.hud-player .errbar { display: none !important; }
 
+/* Sits under the header (y 88), never over the title. */
 .errbar {
   position: absolute;
-  left: 0;
-  top: 0;
+  left: 24px;
+  top: 88px;
   z-index: 30;
-  width: 600px;
-  max-height: 84px;
+  width: 552px;
+  /* Two whole lines at most, ending in an ellipsis: clipping the padded box
+     used to show the top of a third line. */
+  max-height: 56px;
   overflow: hidden;
-  padding: 8px 16px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  padding: 0;
   box-sizing: border-box;
-  background: #000;
-  border-bottom: 1px solid #3f0f0f;
-  font-size: 14px;
-  line-height: 1.25;
-  color: #ff8983;
+  background: var(--bg);
+  box-shadow: 0 -8px 0 var(--bg), 0 8px 0 var(--bg);
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
+  color: var(--err);
 }
-
-.phone-url {
-  font-size: 16px;
-  color: #c9c9c9;
-  margin: 8px 0 18px;
-  text-align: center;
-}
+.errbar::before { content: '! '; }
 
 .pair-steps {
   width: 100%;
-  margin: 20px 0 0;
-  padding-left: 22px;
-  font-size: 16px;
-  line-height: 1.45;
-  color: #c9c9c9;
+  box-sizing: border-box;
+  margin: 24px 0 0;
+  padding-left: 36px;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 500;
+  color: var(--t2);
 }
 
+/* The player is the whole 600x600 canvas. Black is see-through on the lens,
+   so the picture floats centred in the sharpest part of it. */
 #yt-wrap {
-  position: relative;
+  position: absolute;
+  left: 0;
+  top: 0;
   width: 600px;
-  height: 338px;
+  height: 600px;
   overflow: hidden;
   background: #000;
 }
 
-#yt-slot,
-#yt-host,
-#yt-host iframe {
+/* Iframe routes (embed, go) keep 600x338, centred at y 131. */
+#yt-slot {
+  position: absolute;
+  left: 0;
+  top: 131px;
+  width: 600px;
+  height: 338px;
+}
+
+#yt-slot > iframe,
+#yt-slot > div {
+  display: block;
   width: 600px;
   height: 338px;
   border: 0;
   pointer-events: none;
+  background: #000;
+}
+
+/* HTML5 routes get the whole box with object-fit: contain, so 16:9 lands at
+   600x338 centred and 9:16 at 338x600. #yt-video is WP5's persistent element;
+   #yt-slot > video is the per-video element it replaces. */
+#yt-slot:has(> video) {
+  top: 0;
+  height: 600px;
+}
+
+#yt-video-slot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 600px;
+  height: 600px;
+}
+
+#yt-slot > video,
+#yt-video {
+  display: block;
+  width: 600px;
+  height: 600px;
+  border: 0;
   object-fit: contain;
+  pointer-events: none;
   background: #000;
 }
 
 #yt-poster {
   position: absolute;
   left: 0;
-  top: 0;
+  top: 131px;
   width: 600px;
   height: 338px;
   object-fit: cover;
@@ -437,8 +527,25 @@ body.hud-player .errbar { display: none !important; }
 
 #yt-poster.hidden { display: none !important; }
 
-#yt-wrap.audio-only #yt-slot { visibility: hidden; }
-#yt-wrap.audio-only #yt-poster { display: block !important; opacity: 1; }
+/* Audio only: the picture is not drawn at all, and the poster shrinks to a
+   dim 160x90 thumbnail bottom-left, so 3-5% of the panel is lit. */
+#yt-wrap.audio-only #yt-slot > video,
+#yt-wrap.audio-only #yt-video-slot { display: none; }
+#yt-wrap.audio-only #yt-slot > iframe { visibility: hidden; }
+#yt-wrap.audio-only #yt-poster {
+  display: block !important;
+  left: 24px;
+  /* Below the gate's second line (y 364-392), above the bottom band (480). */
+  top: 390px;
+  width: 160px;
+  height: 90px;
+  border-radius: 12px;
+  opacity: .35;
+}
+
+/* WP5 hides the persistent video's slot on the iframe routes. */
+#yt-video-slot.hidden { display: none !important; }
+#yt-wrap.audio-only #yt-slot > div { visibility: hidden; }
 
 .load-gate,
 .play-gate {
@@ -449,18 +556,20 @@ body.hud-player .errbar { display: none !important; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
+  background: transparent;
   pointer-events: none;
 }
 
 .play-gate { z-index: 8; }
 
+
 .load-spin {
-  width: 40px;
-  height: 40px;
-  border: 3px solid #272727;
-  border-top-color: #fff;
+  width: 48px;
+  height: 48px;
+  border: 4px solid var(--hair);
+  border-top-color: var(--t1);
   border-radius: 50%;
+  box-sizing: border-box;
   animation: gtspin 0.8s linear infinite;
 }
 
@@ -468,65 +577,118 @@ body.hud-player .errbar { display: none !important; }
   to { transform: rotate(360deg); }
 }
 
+/* The title lives in the top band only, never over the picture. */
 .load-gate-title,
-.play-gate-title {
-  width: 520px;
-  margin-top: 16px;
-  font-size: 18px;
+.play-gate-title { display: none; }
+
+.load-gate-msg {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 340px;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  color: var(--t1, #fff);
+  text-align: center;
+}
+
+/* Gate: a 64px glyph and 'Pinch to play' inside a 3px white ring, no fill. */
+.play-gate-pill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 88px;
+  padding: 0 40px 0 24px;
+  box-sizing: border-box;
+  border: 3px solid var(--t1, #fff);
+  border-radius: 44px;
+  background: transparent;
+}
+
+.play-gate-glyph {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  flex: 0 0 auto;
+}
+
+.play-gate-glyph::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 10px;
+  border-style: solid;
+  border-width: 22px 0 22px 38px;
+  border-color: transparent transparent transparent var(--t1, #fff);
+}
+
+.play-gate-msg {
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 700;
+  color: var(--t1, #fff);
+  background: transparent;
+  white-space: nowrap;
+}
+
+.play-gate-sub {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 364px;
+  font-size: 22px;
+  line-height: 28px;
   font-weight: 500;
-  color: #fff;
+  color: var(--t2, #cfd3d9);
   text-align: center;
-}
-
-.load-gate-msg,
-.play-gate-msg {
-  margin-top: 8px;
-  font-size: 15px;
-  font-weight: 700;
-  color: #fff;
-}
-
-.play-gate-msg {
-  padding: 10px 22px;
-  background: #fff;
-  color: #0f0f0f;
-  border-radius: 18px;
-}
-
-.pair-code {
-  font-size: 48px;
-  font-weight: 700;
-  letter-spacing: 10px;
-  color: #fff;
-  text-align: center;
-  margin: 28px 0 12px;
-}
-
-.pair-help {
-  width: 100%;
-  font-size: 16px;
-  line-height: 1.4;
-  color: #c9c9c9;
-  text-align: center;
-}
-
-.debug-rows {
-  width: 100%;
-  font-size: 15px;
-  line-height: 1.4;
-  color: #c9c9c9;
-  padding: 0 4px;
-}
-
-.debug-rows div {
-  margin: 8px 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.debug-ok { color: #3ddc84; }
-.debug-bad { color: #ff8983; }
+.play-gate-sub:empty { display: none; }
+
+/* From iPhone: the code is the hero, 64/800 with wide tracking. */
+.pair-code {
+  font-size: 64px;
+  line-height: 72px;
+  font-weight: 800;
+  letter-spacing: 8px;
+  padding-left: 8px;
+  color: var(--t1);
+  text-align: center;
+  margin: 0 0 16px;
+}
+
+.pair-help {
+  width: 100%;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 500;
+  color: var(--t2);
+  text-align: center;
+}
+
+.debug-rows {
+  width: 100%;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t2);
+  padding: 0;
+}
+
+/* Every value is something to read back to someone: a long row wraps at a
+   word (or, for an unbroken URL or id, anywhere) rather than lose its end. */
+.debug-rows div {
+  margin: 0 0 4px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.debug-ok { color: var(--ok); }
+.debug-bad { color: var(--err); }
 
 #screen-player {
   padding: 0;
@@ -534,320 +696,990 @@ body.hud-player .errbar { display: none !important; }
   background: #000;
 }
 
-.player-meta {
-  padding: 12px 16px 8px;
-  box-sizing: border-box;
+/* ---- Player chrome: a top band (y 24-120) and a bottom band (y 480-576)
+   that fade in on any swipe and out 3s after playback resumes. ---------- */
+
+#player-chrome {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  opacity: 0;
+  transition: opacity 300ms cubic-bezier(.6, 0, .4, 1);
+  pointer-events: none;
+}
+
+#screen-player.chrome-on #player-chrome { opacity: 1; }
+
+#player-top {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 24px;
+  height: 96px;
 }
 
 #player-title {
   width: 100%;
-  font-size: 18px;
+  font-size: 28px;
   font-weight: 700;
-  color: #fff;
+  line-height: 34px;
+  max-height: 68px;
+  color: var(--t1, #fff);
   text-align: left;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  line-height: 1.3;
 }
 
 #player-channel {
   width: 100%;
-  font-size: 14px;
-  font-weight: 400;
-  color: #c9c9c9;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 28px;
+  color: var(--t2, #cfd3d9);
   text-align: left;
-  margin: 6px 0 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+#player-bottom {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 480px;
+  height: 96px;
 }
 
 #player-bar {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
-  z-index: 6;
-  width: 600px;
-  height: 3px;
+  top: 8px;
+  height: 6px;
   margin: 0;
-  background: rgba(255, 255, 255, 0.24);
-  border-radius: 0;
-  overflow: hidden;
+  background: var(--track, rgba(255, 255, 255, .22));
+  border-radius: 3px;
 }
 
-#player-fill {
-  height: 3px;
-  width: 0;
-  background: #ff0000;
+/* Fill and buffer are drawn with transform: scaleX, never width. */
+#player-fill,
+#player-buffer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+}
+
+#player-fill { background: var(--t1, #fff); }
+
+#player-knob {
+  position: absolute;
+  left: -7px;
+  top: -4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent, #ff3d3d);
+  transform: translateX(0);
+}
+
+.player-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 24px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 #player-time {
-  position: absolute;
-  left: 12px;
-  bottom: 10px;
-  z-index: 6;
-  width: auto;
+  flex: 0 0 auto;
   margin: 0;
-  font-size: 12px;
-  font-weight: 500;
-  color: #fff;
-  text-align: left;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 28px;
+  color: var(--t1, #fff);
+  font-variant-numeric: tabular-nums;
 }
 
+#player-seek {
+  flex: 0 0 auto;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 34px;
+  color: var(--t1, #fff);
+  font-variant-numeric: tabular-nums;
+}
+
+#player-seek:empty { display: none; }
+
 #player-next {
-  width: 100%;
-  margin-top: 10px;
-  font-size: 14px;
-  color: #c9c9c9;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 28px;
+  color: var(--t2, #cfd3d9);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Gesture legend: only while paused and in the first few sessions. */
+#player-hint {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 66px;
+  margin: 0;
+  padding: 0;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--t3, #aaafb9);
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-height: 18px;
+  background: transparent;
 }
 
-#player-hint {
-  width: 100%;
-  margin-top: 14px;
-  padding: 8px 12px;
-  font-size: 13px;
-  line-height: 1.35;
-  color: #c9c9c9;
-  text-align: left;
-  background: #212121;
-  border-radius: 8px;
-  box-sizing: border-box;
-}
+#screen-player.legend #player-hint { display: block; }
 
 #player-error {
   width: 100%;
-  font-size: 15px;
-  color: #ff8983;
-  text-align: left;
-  margin-top: 8px;
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 36px;
+  color: var(--t1, #fff);
+  text-align: center;
   white-space: pre-wrap;
   -webkit-user-select: text;
   user-select: text;
 }
 
+
+/* Kept in the DOM so 'Copy errors' can select it, but never drawn. */
 #debug-log {
+  position: absolute;
+  left: -9999px;
+  top: 0;
   display: block;
-  width: 100%;
+  width: 552px;
   min-height: 120px;
-  margin: 8px 0 4px;
+  margin: 0;
   padding: 8px 10px;
   box-sizing: border-box;
-  font: 13px/1.35 ui-monospace, Menlo, monospace;
-  color: #eee;
-  background: #1a1a1a;
+  font: 18px/1.35 ui-monospace, Menlo, monospace;
+  color: var(--t1);
+  background: transparent;
   border: 0;
-  border-radius: 8px;
-  resize: vertical;
+  resize: none;
   -webkit-user-select: text;
   user-select: text;
 }
 
+/* 'Link a different phone' is a plain row with the standard ring, not a grey pill with a
+   red-only focus. */
 #btn-pair-new.menu-btn {
   width: auto;
   align-self: flex-start;
-  min-height: 40px;
-  margin: 0 0 8px 12px;
-  padding: 8px 16px;
-  background: #272727;
-  border-radius: 18px;
-  border-bottom: 0;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-#btn-pair-new.menu-btn:focus {
-  background: #3f3f3f;
-  box-shadow: 0 0 0 3px #ff0000;
+  min-height: 48px;
+  margin: 0 0 4px;
+  padding: 0 20px;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
 }
 
 
 /* ---- Thumbnails that say how far in you already are --------------------- */
 
+/* Video row: 112px, 160x90 thumbnail. Thumbnails rest at .55 so the light on
+   the lens follows the focused row. */
 .list-shot {
   position: relative;
   display: block;
-  width: 128px;
-  height: 72px;
+  width: 160px;
+  height: 90px;
   flex: 0 0 auto;
 }
 
 .list-shot img {
-  width: 128px;
-  height: 72px;
+  width: 160px;
+  height: 90px;
   object-fit: cover;
-  border-radius: 8px;
-  background: #212121;
+  border-radius: 12px;
   display: block;
+  opacity: 0.55;
+  transition: opacity 180ms var(--ease);
 }
 
-.list-dur {
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  padding: 1px 4px;
-  background: rgba(0, 0, 0, 0.85);
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #fff;
-  line-height: 1.3;
-}
+.list-btn:focus .list-shot img { opacity: 1; }
 
 .list-seen {
   position: absolute;
   left: 0;
   bottom: 0;
-  height: 3px;
-  background: #ff0000;
-  border-radius: 0 0 0 8px;
+  height: 5px;
+  background: var(--accent);
+  border-radius: 0 0 0 12px;
 }
 
-/* The list rows used to key their pill styling off :has(img); the thumbnail is
-   now wrapped, so match the wrapper too. */
-.list-btn:has(.list-shot) {
-  min-height: 72px;
-  margin: 0;
-  padding: 8px 8px 8px 4px;
-  width: 100%;
-  align-self: stretch;
-  background: transparent;
-  color: #f1f1f1;
-  border-radius: 0;
-  font-size: 18px;
-  font-weight: 500;
+.list-btn.has-shot {
+  min-height: 112px;
+  padding: 0 12px;
+  gap: 16px;
 }
 
-.list-btn:has(.list-shot) small { color: #c9c9c9; }
+.list-btn.has-shot .list-label {
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  max-height: 60px;
+  -webkit-line-clamp: 2;
+}
 
 /* ---- Buffered-ahead shadow on the scrub bar ---------------------------- */
 
-#player-buffer {
-  position: absolute;
-  left: 0;
-  top: 0;
-  height: 3px;
-  width: 0;
-  background: rgba(255, 255, 255, 0.45);
-}
+#player-buffer { background: var(--buffer, rgba(255, 255, 255, .45)); }
 
-#player-fill { position: relative; }
-
-.relay-offer { margin-top: 10px; }
-
-.relay-offer .back-btn {
-  color: #fff;
-  background: #212121;
-  border-radius: 8px;
-}
 
 /* ---- The band-driven letter grid --------------------------------------- */
 
-.kb-text {
-  width: 100%;
-  min-height: 42px;
+/* WP8: native search field (cursor row -2). It needs real DOM focus so a
+   pinch opens the system composer; the ring follows the cursor class. */
+.kb-field {
+  position: relative;
+  flex: 0 0 auto;
+  height: 52px;
   margin: 0 0 8px;
-  padding: 8px 12px;
   box-sizing: border-box;
-  background: #212121;
-  border-radius: 8px;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  color: #fff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  border-bottom: 2px solid var(--hair, rgba(255, 255, 255, .28));
 }
 
-.kb-text.kb-empty {
-  font-size: 16px;
-  font-weight: 400;
-  letter-spacing: 0;
-  color: #8d8d8d;
+.kb-field::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 3px solid #fff;
+  border-radius: 16px;
+  opacity: 0;
+  transition: opacity 240ms cubic-bezier(.6, 0, .4, 1);
+  pointer-events: none;
 }
 
-.kb-recent {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
-}
+.kb-field.kb-on { border-bottom-color: transparent; }
+.kb-field.kb-on::after { opacity: 1; transition-duration: 180ms; }
 
-.kb-recent-btn {
-  max-width: 180px;
-  padding: 5px 12px;
-  background: #272727;
+.kb-input {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0 16px;
+  box-sizing: border-box;
+  background: transparent;
   border: 0;
-  border-radius: 14px;
-  color: #f1f1f1;
-  font-size: 14px;
+  border-radius: 16px;
+  outline: none;
+  color: var(--t1, #fff);
+  caret-color: var(--t1, #fff);
+  font-family: inherit;
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* The text is clipped at the 16px padding, not the box edge: start the fade
+   there so the sliced first letter is fully hidden, not drawn at half. */
+.kb-input.kb-long {
+  -webkit-mask-image: linear-gradient(90deg, transparent 16px, #000 48px);
+  mask-image: linear-gradient(90deg, transparent 16px, #000 48px);
+}
+
+.kb-input::placeholder {
+  color: var(--t3, #aaafb9);
+  opacity: 1;
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.kb-input::-webkit-search-cancel-button,
+.kb-input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  display: none;
+}
+
+/* WP8: chips row (cursor row -1): recents, or suggestions once two letters
+   are typed. Height is reserved even when empty so the grid never jumps. */
+.kb-chips-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  margin: 0 0 8px;
+}
+
+.kb-chips {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 4px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* More chips past an edge: fade that edge out over 32px instead of a hard cut. */
+.kb-chips.kb-fade-r {
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 32px), transparent);
+}
+.kb-chips.kb-fade-l {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 32px);
+  mask-image: linear-gradient(90deg, transparent, #000 32px);
+}
+.kb-chips.kb-fade-l.kb-fade-r {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+}
+
+.kb-chip {
+  position: relative;
+  flex: 0 0 auto;
+  max-width: 280px;
+  height: 44px;
+  padding: 0 20px;
+  box-sizing: border-box;
+  background: transparent;
+  border: 1.5px solid var(--hair, rgba(255, 255, 255, .28));
+  border-radius: 22px;
+  color: var(--t2, #cfd3d9);
+  font-family: inherit;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
+}
+
+/* No scale on focus: a scaled chip ran over its 8px gap onto the next chip's
+   outline and past the 24px inset. The white ring and label are the cue. */
+.kb-chip.kb-on {
+  color: var(--t1, #fff);
+  border-color: #fff;
+  box-shadow: inset 0 0 0 1.5px #fff;
+}
+
+.kb-hint {
+  flex: 0 0 auto;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--t3, #aaafb9);
+  white-space: nowrap;
 }
 
 .kb-grid {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
 }
 
 .kb-row {
   display: flex;
-  gap: 5px;
+  gap: 4px;
 }
 
+/* Keys: outlines, never fills. 10 columns of about 51.6px in x 24-576. */
 .kb-key {
+  position: relative;
   flex: 1 1 0;
   min-width: 0;
-  height: 46px;
+  height: 52px;
   padding: 0;
-  background: #1c1c1c;
-  border: 1px solid #2f2f2f;
-  border-radius: 7px;
-  color: #f1f1f1;
-  font-size: 20px;
-  font-weight: 500;
+  box-sizing: border-box;
+  background: transparent;
+  border: 1.5px solid var(--hair);
+  border-radius: 12px;
+  color: var(--t2);
+  font-size: 28px;
+  font-weight: 600;
   font-family: inherit;
   cursor: pointer;
 }
 
-.kb-key.kb-space { font-size: 14px; }
+.kb-key::after {
+  content: '';
+  position: absolute;
+  inset: -1.5px;
+  border: 3px solid var(--t1);
+  border-radius: 12px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.kb-key.kb-space { font-size: 22px; }
 
 .kb-actions .kb-key {
-  height: 44px;
-  font-size: 16px;
-  font-weight: 700;
+  height: 52px;
+  font-size: 28px;
+  font-weight: 600;
 }
 
 .kb-key.kb-go {
-  background: #fff;
-  border-color: #fff;
-  color: #0f0f0f;
+  border: 2px solid var(--accent);
+  color: var(--t1);
 }
+
+.kb-key.kb-go::after { inset: -2px; }
 
 /* The grid cursor is its own thing: the band moves a highlight, it never moves
-   DOM focus, so :focus styling would not show anything here. */
+   DOM focus, so :focus styling would not show anything here. Same white ring
+   as focus, plus a slight lift. */
 .kb-key.kb-on {
-  background: #fff;
-  border-color: #fff;
-  color: #0f0f0f;
-  box-shadow: 0 0 0 3px #ff0000;
+  z-index: 1;
+  color: var(--t1);
+  transform: scale(1.06);
 }
 
+.kb-key.kb-on::after { opacity: 1; }
+
+/* The Search key fills red only while the cursor is on it. */
 .kb-key.kb-go.kb-on {
-  background: #ff0000;
-  border-color: #ff0000;
-  color: #fff;
-  box-shadow: 0 0 0 3px #fff;
+  background: var(--accent);
+  color: var(--t1);
 }
+
+/* WP2: scroll fades. 32px black-to-clear overlays at the edges of the scroll
+   area, present only while content continues past that edge (reveal() and
+   syncFades() toggle the classes). Sticky pseudo-elements: they never take
+   focus, and the negative margin (height plus the row gap) means toggling them
+   never moves a row. Black over the HUD's own rows dims them into the room. */
+.screen-body.fade-top::before,
+.screen-body.fade-bottom::after {
+  content: '';
+  position: sticky;
+  z-index: 2;
+  display: block;
+  flex: 0 0 32px;
+  height: 32px;
+  pointer-events: none;
+}
+
+.screen-body.fade-top::before {
+  top: 0;
+  margin-bottom: calc(-32px - var(--gap, 0px));
+  background: linear-gradient(var(--bg), rgba(0, 0, 0, 0));
+}
+
+.screen-body.fade-bottom::after {
+  bottom: 0;
+  margin-top: calc(-32px - var(--gap, 0px));
+  background: linear-gradient(rgba(0, 0, 0, 0), var(--bg));
+}
+
+/* WP2: toast. One short message in the lane above the footer (y 500-548),
+   24/600, no light fill, a leading glyph by kind, two lines at most. The black
+   backing only hides rows scrolling underneath. showToast() drives it. */
+.toast {
+  position: absolute;
+  left: 24px;
+  bottom: 52px;
+  z-index: 25;
+  width: 552px;
+  min-height: 48px;
+  max-height: 78px;
+  padding: 9px 0;
+  box-sizing: border-box;
+  background: var(--bg);
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  color: var(--t1);
+  text-align: left;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 250ms var(--ease);
+  animation: toastin 250ms var(--ease);
+}
+
+.toast.toast-out { opacity: 0; }
+.toast-ok::before { content: '\2713\00a0\00a0'; color: var(--ok); }
+.toast-err::before { content: '!\00a0\00a0'; color: var(--err); }
+.toast-info::before { content: '\2193\00a0\00a0'; color: var(--t1); }
+
+@keyframes toastin {
+  from { opacity: 0; }
+}
+
+/* A toast and a status line can both be up: the status steps above the
+   toast's real top, one line or two (toastRoom() sets --toast-room). */
+.toast:not(.hidden) + .status { bottom: var(--toast-room, 104px); }
+
+/* WP2: settings. '‹ value ›' on the focused row says a pinch changes it. */
+.list-settings .menu-btn:focus small::before { content: '‹\00a0'; color: var(--t3); }
+.list-settings .menu-btn:focus small::after { content: '\00a0›'; color: var(--t3); }
+
+/* WP2: 'Searching…' and 'Loading…' empty states carry the spinner. */
+.empty-msg.empty-busy {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.empty-msg .load-spin {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+}
+
+/* WP2: From iPhone keeps the code block centred in the free space. */
+#screen-phone .screen-body { justify-content: safe center; }
+
+/* WP2: Diagnostics actions sit on one line so the rows get the room. */
+#screen-debug .back-row {
+  flex-direction: row;
+  gap: 8px;
+}
+
+/* They are actions, not hints: row-size 24/600 in --t2 at rest (--t3 is for
+   hints and disabled), --t1 with the ring on focus. */
+#screen-debug .back-btn {
+  min-height: 40px;
+  padding: 5px 14px;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  color: var(--t2);
+  border-radius: 20px;
+}
+#screen-debug .back-btn::after { border-radius: 20px; }
+#screen-debug .back-btn:focus { color: var(--t1); }
+
+/* WP3: navigation footer, list counter, row loading, press, input test */
+.nav-foot {
+  position: absolute;
+  left: 24px;
+  top: 556px;
+  height: 24px;
+  z-index: 5;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--t3);
+  pointer-events: none;
+}
+
+/* Screens with the footer hint end their content at y 552 (the zone line),
+   so no row or fade runs under '◀ Back'. */
+body.has-foot .screen:not(.screen-flush) { padding-bottom: 48px; }
+
+/* Home has no footer, but its last row must still clear the toast lane
+   (y 500-548): end its scroll body at 552 like the footer screens, and while a
+   toast is up end it above the toast (toastRoom() sets --toast-room) so the
+   focused row and its ring are never under it. */
+#screen-home { padding-bottom: 48px; }
+body.toast-up:not(.hud-player) #screen-home { padding-bottom: var(--toast-room, 104px); }
+
+.list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.list-head .title {
+  /* Basis 0: the title's width is what the counter leaves, never its own
+     (fitted) text, so fitText measures a definite width. */
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.list-count {
+  flex: 0 0 auto;
+  margin-right: 4px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t3);
+  font-variant-numeric: tabular-nums;
+}
+
+.pressed { transform: scale(.97); transition: transform 120ms var(--ease); }
+
+.row-load {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t2);
+}
+.row-spin {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 3px solid var(--hair);
+  border-top-color: var(--t1);
+  box-sizing: border-box;
+  animation: row-spin 800ms linear infinite;
+}
+@keyframes row-spin { to { transform: rotate(360deg); } }
+
+.input-log {
+  width: 100%;
+  padding: 0 4px 8px;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--t2);
+  font-variant-numeric: tabular-nums;
+}
+.input-log-head { color: var(--t1); font-weight: 700; margin-bottom: 4px; }
+.input-log-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* WP4: link chip in the Home header. The dot or glyph carries the colour,
+   the word carries the meaning. */
+.link-chip {
+  margin-left: auto;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--t2, #cfd3d9);
+}
+.link-chip.link-off { color: var(--t3, #aaafb9); }
+.link-chip.link-on .chip-dot { color: var(--ok, #4ff08f); }
+.link-chip.link-err { color: var(--err, #ff7a70); }
+
+/* WP4: 'Missed from iPhone', the top Home row while a push waits. */
+#btn-missed .missed-tag {
+  display: block;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
+  color: var(--warn, #ffc24a);
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#btn-missed .missed-tag small {
+  display: inline;
+  width: auto;
+  color: var(--t2);
+}
+#btn-missed .missed-title {
+  display: block;
+  width: 100%;
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#btn-missed small {
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  margin-top: 0;
+}
+
+/* Home fits one screen: with an optional row showing, From iPhone is a
+   one-line 60px row (homeFit() sets .home-tight; the link chip keeps state). */
+.list-home.home-tight [data-menu="phone"] small { display: none; }
+
+/* WP4: From iPhone, linked and not linked. */
+.pair-linked {
+  width: 100%;
+  margin: 32px 0 0;
+  padding: 0 4px;
+  box-sizing: border-box;
+}
+.pair-linked-head {
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 700;
+  color: var(--t1, #fff);
+}
+.pair-ok { color: var(--ok, #4ff08f); }
+.pair-last {
+  margin-top: 20px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t2, #cfd3d9);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pair-linked-code {
+  margin-top: 12px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--t3, #aaafb9);
+  font-variant-numeric: tabular-nums;
+}
+#screen-phone .pair-code {
+  font-size: 64px;
+  line-height: 72px;
+  font-weight: 800;
+  letter-spacing: 8px;
+  margin: 16px 0 8px;
+}
+#screen-phone .pair-help {
+  font-size: 24px;
+  line-height: 32px;
+  color: var(--t2, #cfd3d9);
+}
+#screen-phone .pair-steps {
+  margin-top: 16px;
+  padding-left: 40px;
+  box-sizing: border-box;
+  font-size: 24px;
+  line-height: 32px;
+  color: var(--t2, #cfd3d9);
+}
+.pair-foot {
+  margin-top: 20px;
+  padding: 0 4px;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--t3, #aaafb9);
+}
+/* The build chip sits right of the link chip, not pushed apart from it. */
+.link-chip + .build-chip { margin-left: 12px; }
+
+/* WP7: player states. Dimming uses opacity, not filter, so the work stays on
+   the compositor and the light really drops. With the chrome hidden only the
+   video is lit. */
+
+#yt-slot > *,
+#yt-video,
+#yt-poster { transition: opacity 300ms cubic-bezier(.6, 0, .4, 1); }
+
+#screen-player.dim #yt-slot > *,
+#screen-player.dim #yt-video,
+#screen-player.dim #yt-poster { opacity: .35; }
+
+/* A short rebuffer mid-play shows nothing; only one that lasts over 1s does. */
+#screen-player.rebuffer:not(.stall) #load-gate { visibility: hidden; }
+
+body.hud-player .status { display: none !important; }
+
+/* WP7: final error. The picture goes away and a centred message says what
+   to do, in gesture words. */
+#player-fault {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 128px;
+  height: 344px;
+  z-index: 10;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  pointer-events: none;
+}
+
+#screen-player.fault #player-fault { display: flex; }
+#screen-player.fault #yt-wrap { visibility: hidden; }
+#screen-player.fault #player-bottom { display: none; }
+
+#player-error::before {
+  content: '!\00a0';
+  color: var(--err, #ff7a70);
+  font-weight: 800;
+}
+
+#player-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+#player-error.hidden + #player-actions { display: none; }
+
+.player-action {
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 30px;
+  color: var(--t2, #cfd3d9);
+  background: transparent;
+  border: 0;
+  text-align: center;
+  pointer-events: none;
+}
+
+.relay-offer { margin: 0; }
+
+/* WP7: up next. A 5s card in the bottom band, in place of the time row. */
+#player-upnext {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 24px;
+}
+
+#screen-player.upnext #player-upnext { display: block; }
+#screen-player.upnext .player-row,
+#screen-player.upnext #player-hint { display: none; }
+
+.upnext-line {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 28px;
+  color: var(--t1, #fff);
+}
+
+#upnext-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#upnext-count {
+  flex: 0 0 auto;
+  font-size: 28px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.upnext-hint {
+  margin-top: 8px;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--t3, #aaafb9);
+}
+
+/* WP7: player menu. Down opens it over the dimmed video; the bands step
+   aside so all seven rows fit. */
+#screen-player.menu-open #player-chrome { opacity: 0; }
+
+.player-menu {
+  position: absolute;
+  left: 60px;
+  top: 66px;
+  z-index: 12;
+  width: 480px;
+  padding: 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--surface, #1c1e21);
+  border-radius: 24px;
+}
+
+.pm-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 60px;
+  margin: 0;
+  padding: 0 20px;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 36px;
+  color: var(--t2, #cfd3d9);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 16px;
+  cursor: pointer;
+}
+
+/* Menu rows are .focusable: the design-system ring and the --t1 label on
+   focus come from the shared .focusable rules, not a copy here. */
+
+.pm-val {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 30px;
+  color: var(--t1, #fff);
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-val:empty { display: none; }
+
+.pm-cycle:focus .pm-val::before {
+  content: '\2039\00a0';
+  color: var(--t3, #aaafb9);
+}
+
+.pm-cycle:focus .pm-val::after {
+  content: '\00a0\203a';
+  color: var(--t3, #aaafb9);
+}
+
+.pm-row.pm-off { color: var(--t3, #aaafb9); }
+.pm-row.pm-off .pm-val { color: var(--t3, #aaafb9); }
+
+/* WP7: in the player, toasts sit on the last line of the bottom band, where
+   the legend would be, and the legend steps aside while one shows. */
+body.hud-player .toast {
+  top: auto;
+  bottom: 24px;
+  min-height: 0;
+  max-height: 30px;
+  padding: 0;
+  -webkit-line-clamp: 1;
+}
+
+#stage:has(> #toast:not(.hidden)) #player-hint { visibility: hidden; }

@@ -6,7 +6,41 @@ Standing orders (do this every session):
 1. `git pull` (or `git pull gitlab main`) before you read or write this file.
 2. Read `## To other`. That is your job list.
 3. Do the work in this repo. Leave unrelated files alone.
-4. Edit only `## To Mac` and one line under `## Log`. Do not rewrite `## To other` except a short DONE line if needed.
+4. Edit only `## To Mac` and one line under `### HUD v2 on the Mac, 2026-10-14
+
+- **Live.** `npm run deploy` from a clean `hud-v2` worktree
+  (`~/Documents/glasstube-hud-v2`). Page, `/api/pair` and local stamp all say
+  build `12aa906d`. `node scripts/selftest.mjs` against production: every
+  check passes (1 expected skip, server-side resolve), including the browser
+  checks: HUD loads clean and plays the phone file route in 2.1 s.
+  `scripts/test-delivery.mjs` 50/50. `/api/suggest` and
+  `/.well-known/meta-wearables-manifest.json` answer.
+- **iOS.** Built and installed with `ios/install.sh` from the hud-v2 worktree:
+  first compile, no errors. This build has hud-v2's iOS code only, NOT the
+  uncommitted Berth account-sync work in `~/Documents/glasstube`.
+- **Backend is Berth**, app `glasstube` (`berth logs --app glasstube` shows the
+  live glasstube_poll/push/touch traffic and the WP6 probes 404ing).
+- **WP6 SQL rewritten, not run.** The draft would have broken WP6 itself:
+  `ack_seq` already exists and the live `glasstube_ack` writes it, so a 'got'
+  for push N landed on a row still saying 'playing' for N-1 and /api/push
+  would answer "Playing" for every later push (reproduced on a local copy of
+  the live schema). Also: Berth takes one statement per request (no
+  begin/commit), lookups now go through the live `glasstube_find` (trim +
+  expiry), no revoke/grant (live functions use default EXECUTE, and the
+  Supabase roles do not exist on Berth), and the rollback no longer drops the
+  live `ack_seq`. **Run on 2026-10-14** with `sh scripts/sql/run-berth.sh
+  scripts/sql/2026-10-delivery.sql`; /api/push now waits for the glasses
+  (verified on production: playing -> "Playing", pinch -> "Pinch to start
+  it", got only -> "still starting it"). The selftest treats the honest
+  "not checked in" answer for its glasses-less pair as a pass.
+- **Mike's decisions**, applied: amber (not red) phone banner for
+  not-yet-confirmed outcomes, outlined Play all pill, HUD proxy wait 9 s,
+  pinch on Finished replays the last video, held pushes go to Missed after
+  10 min. Live as build `e8081a40`. The amber-banner iOS build compiled but
+  the iPhone was unavailable; install it with `ios/install.sh` from the
+  hud-v2 worktree.
+
+## Log`. Do not rewrite `## To other` except a short DONE line if needed.
 5. When done or blocked, write a clear status under `## To Mac` so Mac Cursor can tell Mike.
 6. Commit with a message like `handoff: ...` then `git push` the GitLab remote only. Never push origin/GitHub.
 7. No secrets, no PATs, no `.env` contents in this file.
@@ -114,6 +148,8 @@ Not verified, needs Mike wearing the glasses:
 If it still fails: Diagnostics on the glasses, Run self-test, Copy errors. The
 readout now names the page origin, the route chain, whether the phone sent a
 file, and whether the server can resolve anything today.
+2026-10-14 Mac: deployed hud-v2 (build 12aa906d) to production; selftest all pass; iOS WebScreen change built and installed (2.2 (35), hud-v2 code only); WP6 SQL corrected for Berth, not run yet. Details under To Mac.
+2026-10-14 Mac: WP6 migration run on Berth (5 statements, smoke-tested), Mike's decisions applied (amber phone banner, outlined Play all, 9s proxy wait, Finished replays the last video), build e8081a40 deployed; selftest all pass; confirmed delivery verified end to end on production; PR #1 merged.
 
 ### Follow-up, same day
 
@@ -207,6 +243,7 @@ Web icons went to `?v=4` so the Meta drawer refetches.
 2026-09-14 Mac: iPhone app rewritten in SwiftUI (2.0/28), new icon on both iOS and the Meta drawer, feed caching for YouTube's bursty RSS.
 2026-09-14 Mac: Liquid Glass redesign, light/dark/system with per-scheme accents, real Settings tab, iOS 2.1 (29), target raised to iOS 26.
 2026-09-14 Mac: icon redone in YouTube red across iOS and the web set, app accent defaults to match, iOS 2.1 (30).
+2026-10-14 cloud: HUD v2 (WP1-WP8 plus 9 review rounds) on branch hud-v2; deploy, Restart, iOS build and WP6 SQL left for the Mac. Details under "HUD v2 built".
 
 ### Share from YouTube, 2026-09-24
 
@@ -242,3 +279,39 @@ Rules that bit us:
   `ios/install.sh`.
 - Uncommitted iOS work (Berth account sync: Berth.swift, SyncAccountView.swift,
   Store.swift...) lives only on the Mac and belongs to another chat.
+
+### HUD v2 built, 2026-10-14 (from the cloud session)
+
+Branch `hud-v2`, PR to main. All eight work packages from
+`docs/hud-plan/PLAN.md` are in, merged in plan order, then put through nine
+rounds of review (visuals on additive screenshots, Neural Band navigation,
+player and push, code regressions, performance against Meta's budgets). Each
+finding was reproduced by two independent skeptics before it was fixed. The
+last rounds: performance clean for four rounds, player and regressions clean
+for three. Before/after additive screenshots are in `docs/hud-plan/shots/`.
+
+Not done from the cloud, needs the Mac:
+- **Deploy.** The cloud environment blocks glasstube.vercel.app, youtube.com
+  and vercel.com, and has no Vercel login. Run `npm run deploy` (it stamps the
+  build, then `vercel --prod`) from a clean checkout of `hud-v2`. Then
+  `node scripts/selftest.mjs`; it has not been run against production with
+  this code. `api/_rpc.js` is byte-identical to main.
+- **One Restart on the glasses after the deploy.** The page in memory has no
+  updater. Middle-finger tap on GlassTube's Home, then Restart. After that the
+  build chip at the top right shows the new hash for 3 s, and later deploys
+  reload by themselves after about 20 s idle on Home.
+- **iOS** (not compiled here): `ios/GlassTube/WebScreen.swift` gives the push
+  request its own 30 s session (semaphore 32 s), because `/api/push` now waits
+  up to 9.5 s for the glasses to confirm. Build with `ios/install.sh`. Once that
+  build is out, `BUDGET_MS` in `api/push.js` can go from 9500 to about 13000.
+- **WP6 migration** `scripts/sql/2026-10-delivery.sql` is NOT run. Read its
+  header: pick the backend `GLASSTUBE_SUPABASE_URL` serves (Supabase or Berth),
+  check the ASSUMED lines against `pg_get_functiondef`, deploy code first, then
+  run it. Until then the server falls back to today's behaviour (the phone gets
+  today's immediate "Playing on your glasses"); `node scripts/test-delivery.mjs`
+  covers both states (50/50 pass).
+
+Testing without the network: `scripts/hudshot.mjs` now serves fixtures when
+production is unreachable, fakes the phone's file with local VP9 clips
+(`sh scripts/mkmedia.sh`, then `--media id=v169.mp4`), and takes
+`--autoplay-policy` and `--push2-after`.
