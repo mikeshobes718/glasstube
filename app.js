@@ -3097,7 +3097,18 @@ function renderSearchChips(chips) {
       b.addEventListener('click', () => { typed = text; runSearch(); });
       box.appendChild(b);
     });
-    fitText([].map.call(box.children, (b, i) => [b, labels[i], 1]));
+    // A chip is as wide as its label (flex 0 0 auto), so its own width says
+    // nothing about the room it has: fit against its max-width instead.
+    const first = box.firstElementChild;
+    let slot;
+    if (first) {
+      const cs = getComputedStyle(first);
+      const px = k => parseFloat(cs[k]) || 0;
+      const w = px('maxWidth') - px('paddingLeft') - px('paddingRight') -
+        px('borderLeftWidth') - px('borderRightWidth');
+      if (w > 0) slot = { w: w, font: cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily };
+    }
+    fitText([].map.call(box.children, (b, i) => [b, labels[i], 1]), slot);
   }
   box.classList.toggle('kb-suggest', chips.kind === 'suggest');
   if (chipIdx > chips.items.length - 1) chipIdx = Math.max(0, chips.items.length - 1);
@@ -3133,12 +3144,14 @@ function renderSearch() {
   }
   const field = $('#kb-field');
   if (field) field.classList.toggle('kb-on', keyRow === KB_INPUT_ROW);
-  renderSearchChips(chips);
+  // The hint shares the chips row: settle it first so the chip scroll and
+  // edge fades below are worked out against the row's final width.
   const hint = $('#kb-hint');
   if (hint) {
     hint.classList.toggle('hidden',
       !(chips.kind === 'suggest' && typed.trim().length >= 3 && keyRow >= 0));
   }
+  renderSearchChips(chips);
 }
 
 function kbFocusInput() {
