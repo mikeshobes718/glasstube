@@ -57,6 +57,8 @@ const PLAYLISTS_KEY = 'glasstube.playlists';
 const PROGRESS_KEY = 'glasstube.progress';
 const CHANNELS_KEY = 'glasstube.channels';
 const SESSION_KEY = 'glasstube.session';
+// When the running sleep timer ends (ms), so a reload resumes it, not restarts it.
+const SLEEP_UNTIL_KEY = 'glasstube.sleepUntil';
 const MARKS_KEY = 'glasstube.marks';
 const QUERIES_KEY = 'glasstube.queries';
 /* A video counts as finished, not resumable, this close to the end. */
@@ -820,9 +822,19 @@ function maybeShuffle(videos) {
   return videos;
 }
 
-function armSleep() {
+/* Starts the timer the wearer just picked. With resume (page load), only the
+   deadline already saved counts: a timer that has run out, or none saved, goes
+   back to Off instead of starting a fresh one. */
+function armSleep(resume) {
   const mins = prefs ? prefs.sleep() : 0;
-  sleepUntil = mins ? Date.now() + mins * 60000 : 0;
+  let saved = 0;
+  try { saved = Number(localStorage.getItem(SLEEP_UNTIL_KEY)) || 0; } catch (e) { /* private mode */ }
+  sleepUntil = !mins ? 0 : resume ? (saved > Date.now() ? saved : 0) : Date.now() + mins * 60000;
+  if (mins && !sleepUntil && prefs) prefs.setSleep(0);
+  try {
+    if (sleepUntil) localStorage.setItem(SLEEP_UNTIL_KEY, String(sleepUntil));
+    else localStorage.removeItem(SLEEP_UNTIL_KEY);
+  } catch (e) { /* private mode */ }
   if (sleepWatch) clearInterval(sleepWatch);
   sleepWatch = 0;
   if (!sleepUntil) {
@@ -835,6 +847,10 @@ function armSleep() {
       sleepUntil = 0;
       if (sleepWatch) clearInterval(sleepWatch);
       sleepWatch = 0;
+      // Once fired, sleep is Off everywhere: settings, the player menu, reload.
+      if (prefs) prefs.setSleep(0);
+      try { localStorage.removeItem(SLEEP_UNTIL_KEY); } catch (e) { /* private mode */ }
+      if (menuIsOpen()) renderPlayerMenu();
       if (typeof Player !== 'undefined' && Player.pause) Player.pause();
       show('home');
       setStatus('Sleep timer ended.', false);
@@ -2229,16 +2245,21 @@ function queuePlayerPaint() {
   }, 0);
 }
 
+/* The load gate is on screen: shown, and not a short rebuffer (which the
+   stylesheet hides until it lasts over 1s). */
+function loadGateShown() {
+  const scr = screens.player;
+  const load = $('#load-gate');
+  return !!(load && !load.classList.contains('hidden')) &&
+    !(scr && scr.classList.contains('rebuffer') && !scr.classList.contains('stall'));
+}
+
 /* States that keep the chrome up: the gate, a pause, the final error, a
    stall over 1s, the up next card, and loading before the first frame. */
 function chromeSticky(snap) {
-  const scr = screens.player;
   const gate = $('#play-gate');
-  const load = $('#load-gate');
   const gateOn = !!(gate && !gate.classList.contains('hidden')) && !finished;
-  const loadOn = !!(load && !load.classList.contains('hidden')) &&
-    !(scr && scr.classList.contains('rebuffer') && !scr.classList.contains('stall'));
-  return gateOn || loadOn || !!snap.paused || playerFault() || upNextIdx >= 0;
+  return gateOn || loadGateShown() || !!snap.paused || playerFault() || upNextIdx >= 0;
 }
 
 function paintPlayer() {
@@ -2249,7 +2270,7 @@ function paintPlayer() {
   const gateOn = !!(gate && !gate.classList.contains('hidden'));
   const fault = playerFault();
   scr.classList.toggle('fault', fault);
-  scr.classList.toggle('dim', gateOn || !!snap.paused || menuIsOpen() || fault || finished || upNextIdx >= 0);
+  scr.classList.toggle('dim', gateOn || loadGateShown() || !!snap.paused || menuIsOpen() || fault || finished || upNextIdx >= 0);
   scr.classList.toggle('legend', !!snap.paused || legendFresh());
   if (chromeSticky(snap)) {
     scr.classList.add('chrome-on');
@@ -4359,7 +4380,7 @@ sessionStore(sessionLoad());
 renderSettings();
 pairBoot();
 renderHome();
-if (prefs && prefs.sleep()) armSleep();
+if (prefs && prefs.sleep()) armSleep(true);
 ensureListening();
 setInterval(function () { if (!pollBusy) maybeUpdate(); }, UPDATE_CHECK_MS);
 setInterval(pollWatchdog, WATCHDOG_MS);

@@ -195,6 +195,11 @@ const Player = (() => {
         try { v.currentTime = pendingStart; } catch (e) { /* ignored */ }
       }
       pendingStart = 0;
+      // The readout can show the length even while the gate waits for a pinch.
+      emit('meta');
+    });
+    v.addEventListener('durationchange', function () {
+      if (mine()) emit('meta');
     });
     v.addEventListener('error', function () {
       if (!mine() || !v.error) return;
