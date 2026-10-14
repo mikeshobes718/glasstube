@@ -1231,8 +1231,9 @@ body.hud-player .errbar { display: none !important; }
   from { opacity: 0; }
 }
 
-/* A toast and a status line can both be up: the status steps above it. */
-.toast:not(.hidden) + .status { bottom: 100px; }
+/* A toast and a status line can both be up: the status steps above the
+   toast's real top, one line or two (toastRoom() sets --toast-room). */
+.toast:not(.hidden) + .status { bottom: var(--toast-room, 104px); }
 
 /* WP2: settings. '‹ value ›' on the focused row says a pinch changes it. */
 .list-settings .menu-btn:focus small::before { content: '‹\00a0'; color: var(--t3); }
@@ -1259,6 +1260,20 @@ body.hud-player .errbar { display: none !important; }
   flex-direction: row;
   gap: 8px;
 }
+
+/* They are actions, not hints: row-size 24/600 in --t2 at rest (--t3 is for
+   hints and disabled), --t1 with the ring on focus. */
+#screen-debug .back-btn {
+  min-height: 40px;
+  padding: 5px 14px;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  color: var(--t2);
+  border-radius: 20px;
+}
+#screen-debug .back-btn::after { border-radius: 20px; }
+#screen-debug .back-btn:focus { color: var(--t1); }
 
 /* WP3: navigation footer, list counter, row loading, press, input test */
 .nav-foot {
