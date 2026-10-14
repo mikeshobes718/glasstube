@@ -453,6 +453,7 @@ function show(name) {
     if (screens[k]) screens[k].classList.toggle('hidden', k !== name);
   });
   fitPending(screens[name]);
+  if (name === 'home') homeFit();
   setStatus('');
   const bar = $('#errbar');
   if (bar && name === 'player') {
@@ -647,8 +648,9 @@ function showToast(text, kind, ms) {
 function toastRoom(el) {
   const up = !!el && !el.classList.contains('hidden');
   document.body.classList.toggle('toast-up', up);
+  if (up) document.body.style.setProperty('--toast-room', (52 + el.offsetHeight + 4) + 'px');
+  if (current === 'home') homeFit();
   if (!up) return;
-  document.body.style.setProperty('--toast-room', (52 + el.offsetHeight + 4) + 'px');
   const f = document.activeElement;
   if (current !== 'home' || !f || !f.closest || !f.closest('#screen-home .screen-body')) return;
   if (f.getBoundingClientRect().bottom + 4 > el.getBoundingClientRect().top) reveal(f);
@@ -803,10 +805,12 @@ function renderContinue() {
   if (!p) {
     const had = document.activeElement === btn;
     btn.classList.add('hidden');
+    homeFit();
     if (had) homeRefocus(btn);
     return;
   }
   btn.classList.remove('hidden');
+  homeFit();
   // Continue carries the queue too, so Home needs no separate Queue row.
   const n = (p.queue || []).length;
   if (sub) {
@@ -951,7 +955,40 @@ function renderHome() {
   if (lib) lib.classList.toggle('hidden', !ytSession);
   const sub = document.querySelector('[data-menu="library"] small');
   if (sub) sub.textContent = 'Subscriptions, playlists, liked';
+  homeFit();
   homeRefocus(had);
+}
+
+/* Home fits one screen (y 88-552). With an optional row (Missed, Continue,
+   Library) showing, From iPhone drops its second line (the header chip still
+   shows the link) so every row fits. With two, Home scrolls: its scroll body
+   then ends on a whole row plus the gap, so the first paint never cuts a row
+   at the fold and the bottom fade still signals more. */
+function homeFit() {
+  const body = document.querySelector('#screen-home .list-home');
+  if (!body) return;
+  const extra = ['#btn-missed', '#btn-continue', '[data-menu="library"]'].some(function (s) {
+    const b = body.querySelector(s);
+    return !!b && !b.classList.contains('hidden');
+  });
+  body.classList.toggle('home-tight', extra);
+  const scr = body.offsetParent;
+  if (current !== 'home' || !scr) return;
+  // The height the body would get uncapped (it is the screen's last flex
+  // item), read without un-capping it, so a scrolled Home keeps its place.
+  const room = scr.clientHeight - (parseFloat(getComputedStyle(scr).paddingBottom) || 0) - body.offsetTop;
+  let cap = '';
+  if (room > 0 && body.scrollHeight > room + 1) {
+    let end = 0;
+    [].forEach.call(body.children, function (el) {
+      const b = el.offsetTop + el.offsetHeight;
+      if (el.offsetParent === body && b <= room && b > end) end = b;
+    });
+    const gap = parseFloat(getComputedStyle(body).rowGap) || 0;
+    if (end) cap = Math.min(room, end + gap) + 'px';
+  }
+  if (body.style.maxHeight !== cap) body.style.maxHeight = cap;
+  updateFades(body);
 }
 
 /* A row Home just hid (Library, Missed, Continue) must not keep focus, or the
@@ -2112,12 +2149,14 @@ function renderMissed() {
   const m = missedLoad()[0];
   const was = !btn.classList.contains('hidden');
   btn.classList.toggle('hidden', !m);
+  homeFit();
   if (!m) {
     if (was && document.activeElement === btn && current === 'home') focusFirst();
     return;
   }
   const title = pushTitle(m);
-  const sub = 'Sent ' + agoText(Date.now() - m.at) + ' · pinch to play';
+  // One status line (tag + age) and the title keep the row at 80px.
+  const sub = ' · Sent ' + agoText(Date.now() - m.at);
   const mt = $('#missed-title');
   if (mt._fitText !== title || mt.classList.contains('fit-wait')) fitText([[mt, title, 1]]);
   if ($('#missed-sub').textContent !== sub) $('#missed-sub').textContent = sub;
@@ -2842,11 +2881,14 @@ function menuAct(row) {
   }
 }
 
+/* Recents and Playlists read storage on every render, not once at open:
+   Back onto them after a play or a push shows what is stored now. entry.videos
+   follows, so navPopTo can still land on the row that was playing. */
 function openRecents() {
-  const list = recentsLoad();
   navTo({
-    name: 'list', kind: 'recents', videos: list,
-    render: function () {
+    name: 'list', kind: 'recents', videos: recentsLoad(),
+    render: function (entry) {
+      const list = entry.videos = recentsLoad();
       if (!list.length) {
         renderList('Recents', [], 'Nothing played yet. Send a link from your iPhone, or pick a channel.',
           'recents', { label: 'Open Channels', onPick: () => openChannels() });
@@ -2860,10 +2902,10 @@ function openRecents() {
 /* A saved playlist opens its contents (Play all plus the rows), the same as a
    channel does, instead of starting to play on the pinch. */
 function openPlaylists() {
-  const lists = playlistsLoad();
   navTo({
     name: 'list', kind: 'playlists',
     render: function () {
+      const lists = playlistsLoad();
       renderList('Playlists', lists.map(p => ({
         key: 'pl:' + p.name,
         count: true,
@@ -3543,10 +3585,10 @@ function openLibraryPlaylist(p) {
 }
 
 function openSubs() {
-  const subs = (library && library.subscriptions) || [];
   navTo({
     name: 'list', kind: 'subs',
     render: function () {
+      const subs = (library && library.subscriptions) || [];
       renderList('Subscriptions', subs.map(ch => ({
         key: ch.id,
         count: true,
