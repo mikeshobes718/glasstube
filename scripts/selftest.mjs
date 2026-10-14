@@ -197,8 +197,12 @@ async function checkPushRoundTrip(pair, fileUrl) {
         videos: [{ id: SAMPLE, title: 'selftest', channel: 'selftest', u: fileUrl, r: relay }],
       }),
     });
-    if (!d.ok && d.error) { bad('push', d.error); return; }
-    ok('push accepted');
+    // WP6: with delivery live, a push to a pair no glasses poll is saved but
+    // answered honestly (ok:false, delivery.state 'away'). That is a pass; the
+    // round trip below still proves it was stored with its file.
+    const state = d.delivery && d.delivery.state;
+    if (!d.ok && d.error && state !== 'away') { bad('push', d.error); return; }
+    ok('push accepted', state === 'away' ? 'saved; delivery says no glasses checked in (expected here)' : (state || ''));
   } catch (e) { bad('push', e.message); return; }
 
   try {

@@ -28,8 +28,17 @@ Standing orders (do this every session):
   begin/commit), lookups now go through the live `glasstube_find` (trim +
   expiry), no revoke/grant (live functions use default EXECUTE, and the
   Supabase roles do not exist on Berth), and the rollback no longer drops the
-  live `ack_seq`. Run with `sh scripts/sql/run-berth.sh
-  scripts/sql/2026-10-delivery.sql` once Mike says yes.
+  live `ack_seq`. **Run on 2026-10-14** with `sh scripts/sql/run-berth.sh
+  scripts/sql/2026-10-delivery.sql`; /api/push now waits for the glasses
+  (verified on production: playing -> "Playing", pinch -> "Pinch to start
+  it", got only -> "still starting it"). The selftest treats the honest
+  "not checked in" answer for its glasses-less pair as a pass.
+- **Mike's decisions**, applied: amber (not red) phone banner for
+  not-yet-confirmed outcomes, outlined Play all pill, HUD proxy wait 9 s,
+  pinch on Finished replays the last video, held pushes go to Missed after
+  10 min. Live as build `e8081a40`. The amber-banner iOS build compiled but
+  the iPhone was unavailable; install it with `ios/install.sh` from the
+  hud-v2 worktree.
 
 ## Log`. Do not rewrite `## To other` except a short DONE line if needed.
 5. When done or blocked, write a clear status under `## To Mac` so Mac Cursor can tell Mike.
@@ -140,6 +149,7 @@ If it still fails: Diagnostics on the glasses, Run self-test, Copy errors. The
 readout now names the page origin, the route chain, whether the phone sent a
 file, and whether the server can resolve anything today.
 2026-10-14 Mac: deployed hud-v2 (build 12aa906d) to production; selftest all pass; iOS WebScreen change built and installed (2.2 (35), hud-v2 code only); WP6 SQL corrected for Berth, not run yet. Details under To Mac.
+2026-10-14 Mac: WP6 migration run on Berth (5 statements, smoke-tested), Mike's decisions applied (amber phone banner, outlined Play all, 9s proxy wait, Finished replays the last video), build e8081a40 deployed; selftest all pass; confirmed delivery verified end to end on production; PR #1 merged.
 
 ### Follow-up, same day
 
