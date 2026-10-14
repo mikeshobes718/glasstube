@@ -1028,6 +1028,8 @@ let navGen = 0;
 let navRendering = false;
 let navAfterRoot = null;
 
+function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
 function navTop() { return navStack[navStack.length - 1]; }
 function navDepth() { return navStack.length - 1; }
 
@@ -2922,7 +2924,7 @@ function openPlaylists() {
         key: 'pl:' + p.name,
         count: true,
         label: p.name,
-        sub: (p.videos || []).length + ' videos',
+        sub: plural((p.videos || []).length, 'video'),
         onPick: () => navVideoList(p.name, p.videos || [], 'playlist'),
       })), 'Send a playlist from your iPhone. It stays here after that.', 'playlists',
       { label: 'Pair your iPhone', sub: 'Then send a playlist from the app', onPick: () => openPhone() });
@@ -2960,7 +2962,7 @@ function renderChannels(page) {
     items.push({
       key: 'first-page',
       label: 'First page',
-      sub: all.length + ' channels',
+      sub: plural(all.length, 'channel'),
       onPick: () => openChannels(0, true),
     });
   }
@@ -3006,7 +3008,7 @@ function loadChannel(ch) {
           return;
         }
         setOffline(false);
-        feedHealth = 'ok · ' + (d.videos || []).length + ' videos';
+        feedHealth = 'ok · ' + plural((d.videos || []).length, 'video');
         const videos = (d.videos || []).map(v => ({
           id: v.id,
           title: v.title,
@@ -3536,7 +3538,7 @@ function renderLibrary() {
       key: 'lib:wl',
       count: true,
       label: 'Watch later',
-      sub: d.watchLater.length + ' videos',
+      sub: plural(d.watchLater.length, 'video'),
       onPick: () => navVideoList('Watch later', d.watchLater, 'libvideos'),
     });
   }
@@ -3545,7 +3547,7 @@ function renderLibrary() {
       key: 'lib:likes',
       count: true,
       label: 'Liked videos',
-      sub: d.likes.length + ' videos',
+      sub: plural(d.likes.length, 'video'),
       onPick: () => navVideoList('Liked videos', d.likes, 'libvideos'),
     });
   }
@@ -3554,7 +3556,7 @@ function renderLibrary() {
       key: 'lib:' + p.id,
       count: true,
       label: p.name,
-      sub: p.count + ' videos',
+      sub: plural(p.count, 'video'),
       onPick: () => openLibraryPlaylist(p),
     });
   });
@@ -3563,7 +3565,7 @@ function renderLibrary() {
       key: 'lib:subs',
       count: true,
       label: 'Subscriptions',
-      sub: d.subscriptions.length + ' channels',
+      sub: plural(d.subscriptions.length, 'channel'),
       onPick: () => openSubs(),
     });
   }
@@ -4787,7 +4789,24 @@ function ensureListening() {
 
 // Seed the nav stack's root in history, so the first pushState has a depth-0
 // entry to come back to (system Back on firmware v125.1+, and ArrowLeft).
-try { history.replaceState({ gt: 1, d: 0 }, ''); } catch (e) { /* no history API */ }
+// A load at depth > 0 (a reload from a deeper screen) sits on top of stale
+// entries that system Back would walk into on Home: walk history back to the
+// root first, the way navRoot does, and seed it on the root popstate.
+function seedHistoryRoot() {
+  const h = histDepth();
+  if (h > 0) {
+    navAfterRoot = function () {
+      try { history.replaceState({ gt: 1, d: 0 }, ''); } catch (e) { /* no history API */ }
+    };
+    try {
+      history.go(-h);
+      setTimeout(function () { if (navDepth() === 0) navRunAfterRoot(); }, 800);
+      return;
+    } catch (e) { navAfterRoot = null; }
+  }
+  try { history.replaceState({ gt: 1, d: 0 }, ''); } catch (e) { /* no history API */ }
+}
+seedHistoryRoot();
 
 // Leaving the page saves progress now too (hiding it is handled above).
 window.addEventListener('pagehide', function () {
