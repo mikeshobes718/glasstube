@@ -2398,8 +2398,7 @@ function playerUiReset() {
   bufferSince = 0;
   missedPlayedId = '';
   // Leaving by any path (system Back included) drops the guarded-exit prompt.
-  if (leaveArmedAt && ($('#toast') || {}).textContent === LEAVE_PROMPT) hideToast(true);
-  leaveArmedAt = 0;
+  disarmLeave();
   if (chromeTimer) clearTimeout(chromeTimer);
   chromeTimer = 0;
   if (seekTimer) clearTimeout(seekTimer);
@@ -2436,7 +2435,8 @@ function labelResumeRow(id) {
   }
   if (!row) return;
   const t = resumeAt(id);
-  if (t < 1) return;
+  // The player starts anything at or below RESUME_MIN_S from 0:00.
+  if (t <= (typeof Player !== 'undefined' ? Player.RESUME_MIN_S : 3)) return;
   const copy = row.querySelector('.list-copy');
   let sub = copy && copy.querySelector('small');
   if (copy && !sub) {
@@ -2499,6 +2499,12 @@ function playerPinch() {
   Player.toggle();
   setPlayGate(false);
   updateChrome();
+}
+
+/* Drops the guarded exit and, if its prompt is still up, the prompt too. */
+function disarmLeave() {
+  if (leaveArmedAt && ($('#toast') || {}).textContent === LEAVE_PROMPT) hideToast(true);
+  leaveArmedAt = 0;
 }
 
 /* Left is guarded: the first one shows the chrome and asks; a second within
@@ -2576,7 +2582,9 @@ function renderPlayerMenu() {
   if (nextRow) nextRow.classList.toggle('pm-off', n < 0);
   setText('#pm-next', n >= 0 ? (n + 1) + ' of ' + queue.length : '');
   setText('#pm-speed', prefs ? prefs.speedLabel() : '1x');
-  setText('#pm-sound', sound && !sound.enabled() ? 'Off' : 'On');
+  // A policy mute is silent whatever the pref says, so the row reads Off.
+  const policyMuted = typeof Player !== 'undefined' && Player.mutedByPolicy();
+  setText('#pm-sound', policyMuted || (sound && !sound.enabled()) ? 'Off' : 'On');
   setText('#pm-picture', prefs && prefs.audioOnly() ? 'Audio only' : 'Video');
   const mins = prefs ? prefs.sleep() : 0;
   setText('#pm-sleep', mins ? (prefs.sleepLabel ? prefs.sleepLabel() : mins + 'm') : 'Off');
@@ -2648,7 +2656,16 @@ function menuAct(row) {
     prefs.cycleSpeed();
     live();
   } else if (act === 'sound' && sound) {
-    sound.setEnabled(!sound.enabled());
+    if (typeof Player !== 'undefined' && Player.mutedByPolicy()) {
+      // Like a pinch: one press turns sound on (the arbiter already ran
+      // Player.unlock inside this gesture) and keeps the pref on.
+      sound.setEnabled(true);
+      needGesture = false;
+      Player.unmute();
+      if (/^Sound off/.test(($('#toast') || {}).textContent || '')) hideToast();
+    } else {
+      sound.setEnabled(!sound.enabled());
+    }
     live();
   } else if (act === 'picture' && prefs) {
     prefs.setAudioOnly(!prefs.audioOnly());
@@ -3964,7 +3981,7 @@ function handlePlayerKey(e) {
   else if (key === DPAD.SELECT || key === ' ') k = 'pinch';
   if (!k) return;
   e.preventDefault();
-  if (k !== 'left') leaveArmedAt = 0;
+  if (k !== 'left') disarmLeave();
   if (menuIsOpen()) {
     menuKey(k);
     return;
@@ -4111,6 +4128,9 @@ function inputEvent(e, r) {
 }
 
 document.addEventListener('keydown', function (e) {
+  // Read before noting: the key that completes the test ends it, and it must
+  // be swallowed like the other 19.
+  const testing = !!inputTest && current === 'debug';
   inputTestNote('keydown', e);
   // Any key is activity (WP1): it keeps the fast poll cadence and holds off
   // an update reload, even a key the arbiter then ignores.
@@ -4138,7 +4158,7 @@ document.addEventListener('keydown', function (e) {
   // never reports visible. That key is consumed, so it is not also read as
   // a command on the screen underneath.
   if (pendingPush) { e.preventDefault(); releasePendingPush(); return; }
-  if (inputTest && current === 'debug') return;
+  if (testing) return;
   if (fieldTyping) return;
   const name = r.name || ('char:' + r.char);
   // A filtered Enter is never a pinch, so it must not reach the field either.
@@ -4535,8 +4555,10 @@ function showBuildChip() {
   const chip = $('#build-chip');
   if (!chip) return;
   chip.textContent = 'v' + (window.GLASSTUBE_BUILD || '?');
-  chip.classList.remove('chip-out');
+  chip.classList.remove('chip-out', 'hidden');
   setTimeout(function () { chip.classList.add('chip-out'); }, BUILD_CHIP_MS);
+  // Once faded, drop its layout box so the link chip ends at the right inset.
+  setTimeout(function () { chip.classList.add('hidden'); }, BUILD_CHIP_MS + 450);
 }
 
 function hideSplash() {

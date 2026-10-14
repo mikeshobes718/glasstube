@@ -37,6 +37,9 @@ const Player = (() => {
   const SILENT_WEBM = 'data:video/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwEAAAAAAAJvEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHGTbuMU6uEElTDZ1OsggEwTbuMU6uEHFO7a1OsggJZ7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmoCrXsYMPQkBNgIRMYXZmV0GETGF2ZkSJiEBzQAAAAAAAFlSua+WuAQAAAAAAAFzXgQFzxYgAAAAAAAAAAZyBACK1nIN1bmSIgQCGhkFfT1BVU1aqg2MuoFa7hATEtACDgQLhkZ+BAbWIQOdwAAAAAABiZIEQY6KTT3B1c0hlYWQBATgBgLsAAAAAABJUw2fRc3POY8CLY8WIAAAAAAAAAAFnyJlFo4dFTkNPREVSRIeMTGF2YyBsaWJvcHVzZ8ihRaOIRFVSQVRJT05Eh5MwMDowMDowMC4zMDgwMDAwMDAAH0O2dUDN54EAo4uBAACACAvmOyOrYKOKgQAVgAgIrLMOxqOKgQApgAgIrLMOxqOKgQA9gAgIrLMOxqOKgQBRgAgIrLMOxqOKgQBlgAgIrLMOxqOKgQB5gAgIrLMOxqOKgQCNgAgIrLMOxqOKgQChgAgIrLMOxqOKgQC1gAgIrLMOxqOKgQDJgAgIrLMOxqOKgQDdgAgIrLMOxqOKgQDxgAgIrLMOxqOKgQEFgAgIrLMOxqOKgQEZgAgIrLMOxqCToYqBAS0ACAissw7GdaKEAM3+YBxTu2uRu4+zgQC3iveBAfGCAYbwgQM=';
   const IFRAME_TICK_MS = 1000;
   const TIME_EVENT_MS = 900;
+  // A start at or below this many seconds plays from 0:00; the list's
+  // 'Resume' label uses the same rule (Player.RESUME_MIN_S).
+  const RESUME_MIN_S = 3;
 
   let yt = null;
   let html5 = null;
@@ -191,7 +194,7 @@ const Player = (() => {
     v.addEventListener('loadedmetadata', function () {
       if (!mine()) return;
       metaAt = Date.now();
-      if (pendingStart > 3) {
+      if (pendingStart > RESUME_MIN_S) {
         try { v.currentTime = pendingStart; } catch (e) { /* ignored */ }
       }
       pendingStart = 0;
@@ -714,7 +717,7 @@ const Player = (() => {
         rawSend('addEventListener', ['onStateChange']);
         rawSend('addEventListener', ['onError']);
         applyAll();
-        if (startAt && startAt > 3) rawSend('seekTo', [startAt, true]);
+        if (startAt && startAt > RESUME_MIN_S) rawSend('seekTo', [startAt, true]);
         if (autoplay) tryPlay(true);
         return;
       }
@@ -774,7 +777,7 @@ const Player = (() => {
         }), '*');
       } catch (e) { /* cross-origin until YouTube loads */ }
       setTimeout(function () {
-        if (startAt && startAt > 3) rawSend('seekTo', [startAt, true]);
+        if (startAt && startAt > RESUME_MIN_S) rawSend('seekTo', [startAt, true]);
         if (autoplay) tryPlay(true);
       }, 500);
     });
@@ -829,7 +832,7 @@ const Player = (() => {
     try { v.pause(); } catch (e) { /* ignored */ }
     v.removeAttribute('poster');
     v.muted = true;
-    pendingStart = startAt && startAt > 3 ? startAt : 0;
+    pendingStart = startAt && startAt > RESUME_MIN_S ? startAt : 0;
     loadAt = Date.now();
     growthAt = loadAt;
     metaAt = 0;
@@ -1053,6 +1056,7 @@ const Player = (() => {
   videoEl();
 
   return {
+    RESUME_MIN_S,
     load,
     destroy,
     toggle,
