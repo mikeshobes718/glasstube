@@ -17,6 +17,9 @@ const DEFAULT_CHANNELS = [
   { name: 'MKBHD', id: 'UCBJycsmduvYEL83R_U4JriQ' },
 ];
 
+/* Rows rendered at once. Longer lists page in place ('More' / 'Earlier'
+   rows), so every row stays reachable without building hundreds of rows on
+   the glasses' slow CPU. */
 const MAX_LIST = 40;
 const CHANNEL_PAGE = 8;
 const MAX_RECENTS = 24;
@@ -1305,8 +1308,11 @@ function renderList(title, items, emptyText, kind, emptyAction) {
     if (emptyAction) items = [Object.assign({ key: 'empty-action' }, emptyAction)];
   }
   const fits = [];
+  const page = listPageItems(items, title, emptyText, kind, emptyAction);
+  box.dataset.countBase = page.base;
+  box.dataset.countTotal = page.total;
   if (items.length) {
-    items.slice(0, MAX_LIST).forEach(item => {
+    page.rows.forEach(item => {
       const btn = document.createElement('button');
       btn.className = 'focusable list-btn' + (item.thumb ? ' has-shot' : '') +
         (item.cls ? ' ' + item.cls : '');
@@ -1352,15 +1358,70 @@ function renderList(title, items, emptyText, kind, emptyAction) {
   listCount();
 }
 
+/* One page of a long list. The page is kept on the list's nav entry; a
+   re-render (Back from the player, new data) shows the page holding the
+   remembered row, so Back still lands on the row that was played. Paging
+   swaps the rows in place: Back still leaves the list, not the page. */
+function listPageItems(items, title, emptyText, kind, emptyAction) {
+  const total = items.filter(it => it.count).length;
+  if (items.length <= MAX_LIST) return { rows: items, base: 0, total: total };
+  const top = navTop();
+  const ent = top && top.name === 'list' ? top : {};
+  const pages = Math.ceil(items.length / MAX_LIST);
+  let p = Math.max(0, Math.min(pages - 1, Number(ent.listPage) || 0));
+  if (ent.focusKey) {
+    const at = items.findIndex(it => it.key === ent.focusKey);
+    if (at >= 0) p = Math.floor(at / MAX_LIST);
+  }
+  ent.listPage = p;
+  const start = p * MAX_LIST;
+  const end = Math.min(items.length, start + MAX_LIST);
+  const base = items.slice(0, start).filter(it => it.count).length;
+  const counted = items.slice(start, end).filter(it => it.count).length;
+  const turn = (np, key) => {
+    ent.listPage = np;
+    ent.focusKey = key || '';
+    ent.focusIdx = -1;
+    ent.scrollTop = 0;
+    renderList(title, items, emptyText, kind, emptyAction);
+    const f = focusables();
+    const el = f.filter(x => focusKeyOf(x) === key)[0] || f[0];
+    if (el) { el.focus(); reveal(el); }
+  };
+  const rows = [];
+  if (p > 0) {
+    rows.push({
+      key: 'list-prev',
+      label: 'Earlier',
+      sub: 'Rows 1–' + base + ' of ' + total,
+      onPick: () => turn(p - 1, items[start - 1].key),
+    });
+  }
+  rows.push.apply(rows, items.slice(start, end));
+  if (end < items.length) {
+    rows.push({
+      key: 'list-more',
+      label: 'More',
+      sub: (total - base - counted) + ' more · rows ' + (base + counted + 1) + '–' + total,
+      onPick: () => turn(p + 1, items[end].key),
+    });
+  }
+  return { rows: rows, base: base, total: total };
+}
+
 /* 'n/N' to the right of the list title: the focused row among the counted
-   rows (videos, channels, playlists; not Play all or paging rows). */
+   rows (videos, channels, playlists; not Play all or paging rows), as its
+   position in the whole list when the list is paged. */
 function listCount() {
   const el = $('#list-count');
-  if (!el) return;
-  const rows = [].slice.call(document.querySelectorAll('#list-items [data-count]'));
-  if (rows.length < 2) { el.textContent = ''; return; }
+  const box = $('#list-items');
+  if (!el || !box) return;
+  const rows = [].slice.call(box.querySelectorAll('[data-count]'));
+  const base = Number(box.dataset.countBase) || 0;
+  const total = Math.max(rows.length, Number(box.dataset.countTotal) || 0);
+  if (total < 2) { el.textContent = ''; return; }
   const i = rows.indexOf(document.activeElement);
-  el.textContent = (i >= 0 ? (i + 1) + '/' : '') + rows.length;
+  el.textContent = (i >= 0 ? (base + i + 1) + '/' : '') + total;
 }
 
 {
@@ -3403,7 +3464,7 @@ function renderLibrary() {
       onPick: () => navVideoList('Liked videos', d.likes, 'libvideos'),
     });
   }
-  (d.playlists || []).slice(0, 20).forEach(p => {
+  (d.playlists || []).forEach(p => {
     items.push({
       key: 'lib:' + p.id,
       count: true,
