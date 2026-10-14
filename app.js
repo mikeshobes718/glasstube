@@ -1314,18 +1314,20 @@ function showVideoList(title, videos, kind) {
       key: 'play-all',
       label: 'Play all · ' + videos.length,
       cls: 'is-action',
-      onPick: () => playFromList(title, videos, 0, true),
+      onPick: () => playFromList(title, videos, 0, true, kind),
     });
   }
   items.push.apply(items, videoItems(videos, function (i) {
-    playFromList(title, videos, i, false);
+    playFromList(title, videos, i, false, kind);
   }));
   renderList(title, items, 'No videos in this list.', kind);
 }
 
-function playFromList(title, videos, index, all) {
+function playFromList(title, videos, index, all, kind) {
   skipIds = {};
-  queue = videos.map(v => Object.assign({}, v, { _listTitle: title }));
+  // The phone's list stays the phone's list: pushed queues never wrap (WP7.8).
+  const pushed = kind === 'push' || !!(videos[0] && videos[0]._pushed);
+  queue = videos.map(v => Object.assign({}, v, { _listTitle: title }, pushed ? { _pushed: true } : null));
   if (all) queue = maybeShuffle(queue);
   const v = queue[index];
   if (!v) return;
@@ -1539,14 +1541,13 @@ function skipUnplayable(err, code) {
   pushFailed();
   playFailNote(err, code);
   if (nowPlaying && nowPlaying.id) skipIds[nowPlaying.id] = true;
-  for (let i = 1; i <= queue.length; i++) {
-    const idx = (queueIndex + i) % queue.length;
-    const v = queue[idx];
-    if (v && v.id && !skipIds[v.id]) {
-      showToast('Skipped one YouTube would not play.', 'info');
-      openPlayer(idx, true);
-      return;
-    }
+  // Same rule as Up next: forward only, wrapping only on repeat all for a
+  // list that is not the phone's, and never back to a video that failed.
+  const idx = nextIndex(true);
+  if (idx >= 0) {
+    showToast('Skipped one YouTube would not play.', 'info');
+    openPlayer(idx, true);
+    return;
   }
   setLoading(false);
   setPlayGate(false);
@@ -1555,7 +1556,7 @@ function skipUnplayable(err, code) {
   // The message replaces the picture, so nothing may keep playing under it.
   if (typeof Player !== 'undefined' && Player.pause) Player.pause();
   const why = bestFailText(failsFor(blockedFor), code, err);
-  $('#player-error').textContent = queue.length > 1
+  $('#player-error').textContent = queue.length > 1 && queue.every(v => v && skipIds[v.id])
     ? 'Nothing in this list would play. ' + why
     : why;
   $('#player-error').classList.remove('hidden');
@@ -1563,7 +1564,7 @@ function skipUnplayable(err, code) {
   if (nowPlaying && deliveryFor(nowPlaying.id)) deliveryReport('failed', why);
   showRelayOffer();
   const nextAct = $('#player-action-next');
-  if (nextAct) nextAct.classList.toggle('hidden', queue.length < 2);
+  if (nextAct) nextAct.classList.toggle('hidden', nextIndex(false) < 0);
   updateChrome();
 }
 
@@ -1729,14 +1730,15 @@ function shuffleMark(index) {
 }
 
 function shufflePick() {
-  if (shufflePeek && shufflePeek.q === queue && shufflePeek.from === queueIndex) return shufflePeek.n;
+  if (shufflePeek && shufflePeek.q === queue && shufflePeek.from === queueIndex &&
+      !(queue[shufflePeek.n] && skipIds[queue[shufflePeek.n].id])) return shufflePeek.n;
   shuffleMark(queueIndex);
   let pool = [];
-  queue.forEach((v, i) => { if (i !== queueIndex && !shuffleSeen.ids.has(v.id)) pool.push(i); });
+  queue.forEach((v, i) => { if (i !== queueIndex && !shuffleSeen.ids.has(v.id) && !skipIds[v.id]) pool.push(i); });
   const pushed = !!(queue[0] && queue[0]._pushed);
   if (!pool.length && prefs && prefs.repeat() === 'all' && !pushed) {
     shuffleSeen.ids = new Set();
-    queue.forEach((v, i) => { if (i !== queueIndex) pool.push(i); });
+    queue.forEach((v, i) => { if (i !== queueIndex && !skipIds[v.id]) pool.push(i); });
   }
   const n = pool.length ? pool[Math.floor(Math.random() * pool.length)] : -1;
   shufflePeek = { q: queue, from: queueIndex, n };
@@ -1746,9 +1748,13 @@ function shufflePick() {
 function nextIndex(pick) {
   if (!queue.length) return -1;
   if (prefs && prefs.shuffle() && queue.length > 1) return shufflePick();
-  if (queueIndex + 1 < queue.length) return queueIndex + 1;
+  // A video that already failed (skipIds) is never offered again.
+  const ok = i => queue[i] && !skipIds[queue[i].id];
+  for (let i = queueIndex + 1; i < queue.length; i++) if (ok(i)) return i;
   const pushed = !!(queue[0] && queue[0]._pushed);
-  if (prefs && prefs.repeat() === 'all' && queue.length > 1 && !pushed) return 0;
+  if (prefs && prefs.repeat() === 'all' && queue.length > 1 && !pushed) {
+    for (let i = 0; i <= queueIndex && i < queue.length; i++) if (ok(i)) return i;
+  }
   return -1;
 }
 
